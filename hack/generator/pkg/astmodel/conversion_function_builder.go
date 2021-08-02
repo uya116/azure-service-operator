@@ -210,7 +210,6 @@ func IdentityConvertComplexOptionalProperty(builder *ConversionFunctionBuilder, 
 		innerStatements,
 		astbuilder.SimpleAssignment(
 			params.GetDestination(),
-			token.ASSIGN,
 			astbuilder.AddrOf(dst.NewIdent(tempVarIdent))))
 
 	result := &dst.IfStmt{
@@ -314,7 +313,9 @@ func IdentityConvertComplexMapProperty(builder *ConversionFunctionBuilder, param
 	}
 
 	if _, ok := destinationType.KeyType().(*PrimitiveType); !ok {
-		panic(fmt.Sprintf("map had non-primitive key type: %v", destinationType.KeyType()))
+		var keyDescription strings.Builder
+		destinationType.KeyType().WriteDebugDescription(&keyDescription, nil)
+		panic(fmt.Sprintf("map had non-primitive key type: %s", keyDescription.String()))
 	}
 
 	depth := params.CountArraysAndMapsInConversionContext()
@@ -343,8 +344,8 @@ func IdentityConvertComplexMapProperty(builder *ConversionFunctionBuilder, param
 	keyTypeAst := destinationType.KeyType().AsType(builder.CodeGenerationContext)
 	valueTypeAst := destinationType.ValueType().AsType(builder.CodeGenerationContext)
 
-	makeMapStatement := astbuilder.SimpleAssignment(
-		dst.Clone(destination).(dst.Expr),
+	makeMapStatement := astbuilder.AssignmentStatement(
+		destination,
 		makeMapToken,
 		astbuilder.MakeMap(keyTypeAst, valueTypeAst))
 	rangeStatement := &dst.RangeStmt{
@@ -573,12 +574,12 @@ func IdentityDeepCopyJSON(builder *ConversionFunctionBuilder, params ConversionP
 
 // AssignmentHandlerDefine is an assignment handler for definitions, using :=
 func AssignmentHandlerDefine(lhs dst.Expr, rhs dst.Expr) dst.Stmt {
-	return astbuilder.SimpleAssignment(lhs, token.DEFINE, rhs)
+	return astbuilder.AssignmentStatement(lhs, token.DEFINE, rhs)
 }
 
 // AssignmentHandlerAssign is an assignment handler for standard assignments to existing variables, using =
 func AssignmentHandlerAssign(lhs dst.Expr, rhs dst.Expr) dst.Stmt {
-	return astbuilder.SimpleAssignment(lhs, token.ASSIGN, rhs)
+	return astbuilder.SimpleAssignment(lhs, rhs)
 }
 
 // CreateLocal creates an unused local variable name.

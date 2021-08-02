@@ -19,7 +19,7 @@ import (
 // ObjectType represents an (unnamed) object type
 type ObjectType struct {
 	embedded   map[TypeName]*PropertyDefinition
-	properties map[PropertyName]*PropertyDefinition
+	properties PropertySet
 	functions  map[string]Function
 	testcases  map[string]TestCase
 	InterfaceImplementer
@@ -44,7 +44,7 @@ var _ TestCaseContainer = &ObjectType{}
 func NewObjectType() *ObjectType {
 	return &ObjectType{
 		embedded:             make(map[TypeName]*PropertyDefinition),
-		properties:           make(map[PropertyName]*PropertyDefinition),
+		properties:           make(PropertySet),
 		functions:            make(map[string]Function),
 		testcases:            make(map[string]TestCase),
 		InterfaceImplementer: MakeInterfaceImplementer(),
@@ -89,7 +89,6 @@ func (objectType *ObjectType) generateMethodDecls(codeGenerationContext *CodeGen
 }
 
 func defineField(fieldName string, fieldType dst.Expr, tag string) *dst.Field {
-
 	result := &dst.Field{
 		Type: fieldType,
 		Tag:  astbuilder.TextLiteral(tag),
@@ -103,19 +102,8 @@ func defineField(fieldName string, fieldType dst.Expr, tag string) *dst.Field {
 }
 
 // Properties returns all the property definitions
-// A sorted slice is returned to preserve immutability and provide determinism
-func (objectType *ObjectType) Properties() []*PropertyDefinition {
-	var result []*PropertyDefinition
-	for _, property := range objectType.properties {
-		result = append(result, property)
-	}
-
-	// Sorted so that it's always consistent
-	sort.Slice(result, func(left int, right int) bool {
-		return result[left].propertyName < result[right].propertyName
-	})
-
-	return result
+func (objectType *ObjectType) Properties() PropertySet {
+	return objectType.properties.Copy()
 }
 
 // Property returns the details of a specific property based on its unique case sensitive name
@@ -154,7 +142,6 @@ func (objectType *ObjectType) EmbeddedProperties() []*PropertyDefinition {
 // Functions returns all the function implementations
 // A sorted slice is returned to preserve immutability and provide determinism
 func (objectType *ObjectType) Functions() []Function {
-
 	functions := make([]Function, 0, len(objectType.functions))
 	for _, f := range objectType.functions {
 		functions = append(functions, f)
@@ -180,7 +167,7 @@ func (objectType *ObjectType) AsType(codeGenerationContext *CodeGenerationContex
 		fields = append(fields, f.AsField(codeGenerationContext))
 	}
 
-	for _, f := range objectType.Properties() {
+	for _, f := range objectType.properties.AsSlice() {
 		fields = append(fields, f.AsField(codeGenerationContext))
 	}
 
@@ -240,7 +227,10 @@ func (objectType *ObjectType) References() TypeNameSet {
 		results.AddAll(property.PropertyType().References())
 	}
 
-	// Not collecting types from functions deliberately.
+	for _, fn := range objectType.functions {
+		results.AddAll(fn.References())
+	}
+
 	return results
 }
 
@@ -248,7 +238,7 @@ func (objectType *ObjectType) References() TypeNameSet {
 // The order of the properties is not relevant
 func (objectType *ObjectType) Equals(t Type) bool {
 	if objectType == t {
-		return true
+		return true // short circuit
 	}
 
 	other, ok := t.(*ObjectType)
@@ -373,7 +363,6 @@ func (objectType *ObjectType) WithProperties(properties ...*PropertyDefinition) 
 
 // WithEmbeddedProperties creates a new ObjectType with the additional embedded properties included
 func (objectType *ObjectType) WithEmbeddedProperties(properties ...*PropertyDefinition) (*ObjectType, error) {
-
 	// Create a copy of objectType to preserve immutability
 	result := objectType.copy()
 
@@ -560,7 +549,7 @@ func (objectType *ObjectType) WriteDebugDescription(builder *strings.Builder, _ 
 // FindPropertyWithTagValue finds the property with the given tag and value if it exists. The boolean return
 // is false if no match can be found.
 func (objectType *ObjectType) FindPropertyWithTagValue(tag string, value string) (*PropertyDefinition, bool) {
-	for _, prop := range objectType.Properties() {
+	for _, prop := range objectType.properties {
 		values, ok := prop.Tag(tag)
 		if !ok {
 			continue

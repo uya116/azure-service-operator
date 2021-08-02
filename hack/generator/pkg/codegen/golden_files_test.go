@@ -72,7 +72,7 @@ func makeEmbeddedTestTypeDefinition() astmodel.TypeDefinition {
 }
 
 func injectEmbeddedStructType() pipeline.Stage {
-	return pipeline.MakeStage(
+	return pipeline.MakeLegacyStage(
 		"injectEmbeddedStructType",
 		"Injects an embedded struct into each object",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
@@ -116,12 +116,12 @@ func runGoldenTest(t *testing.T, path string, testConfig GoldenTestConfig) {
 		t.Run(string(p), func(t *testing.T) {
 			codegen, err := NewTestCodeGenerator(testName, path, t, testConfig, p)
 			if err != nil {
-				t.Fatalf("failed to create code generator: %v", err)
+				t.Fatalf("failed to create code generator: %s", err)
 			}
 
 			err = codegen.Generate(ctx)
 			if err != nil {
-				t.Fatalf("codegen failed: %v", err)
+				t.Fatalf("codegen failed: %s", err)
 			}
 		})
 	}
@@ -145,33 +145,44 @@ func NewTestCodeGenerator(testName string, path string, t *testing.T, testConfig
 	// TODO: This isn't as clean as would be liked -- should we remove panic from RemoveStages?
 	switch genPipeline {
 	case config.GenerationPipelineAzure:
-		codegen.RemoveStages("deleteGenerated", "rogueCheck", "createStorage", "reportTypesAndVersions")
+		codegen.RemoveStages(
+			pipeline.DeleteGeneratedCodeStageID,
+			pipeline.CheckForAnyTypeStageID,
+			pipeline.CreateStorageTypesStageID,
+			pipeline.InjectOriginalGVKFunctionStageID,
+			pipeline.InjectOriginalVersionFunctionStageID,
+			pipeline.InjectOriginalVersionPropertyStageID,
+			pipeline.InjectPropertyAssignmentFunctionsStageID,
+			// TODO: Once the stage is enabled in the pipeline, we may need to remove it here for testing
+			//pipeline.InjectHubFunctionStageID,
+			pipeline.ReportOnTypesAndVersionsStageID)
 		if !testConfig.HasARMResources {
-			codegen.RemoveStages("createArmTypes", "applyArmConversionInterface")
+			codegen.RemoveStages(pipeline.CreateARMTypesStageID, pipeline.ApplyARMConversionInterfaceStageID)
+
 			// These stages treat the collection of types as a graph of types rooted by a resource type.
 			// In the degenerate case where there are no resources it behaves the same as stripUnreferenced - removing
 			// all types. Remove it in phases that have no resources to avoid this.
-			codegen.RemoveStages("removeEmbeddedResources", "collapseCrossGroupReferences")
+			codegen.RemoveStages(pipeline.RemoveEmbeddedResourcesStageID, pipeline.CollapseCrossGroupReferencesStageID)
 
-			codegen.ReplaceStage("stripUnreferenced", stripUnusedTypesPipelineStage())
+			codegen.ReplaceStage(pipeline.StripUnreferencedTypeDefinitionsStageID, stripUnusedTypesPipelineStage())
 		} else {
-			codegen.ReplaceStage("addCrossResourceReferences", addCrossResourceReferencesForTest(idFactory))
+			codegen.ReplaceStage(pipeline.AddCrossResourceReferencesStageID, addCrossResourceReferencesForTest(idFactory))
 		}
 	case config.GenerationPipelineCrossplane:
-		codegen.RemoveStages("deleteGenerated", "rogueCheck")
+		codegen.RemoveStages(pipeline.DeleteGeneratedCodeStageID, pipeline.CheckForAnyTypeStageID)
 		if !testConfig.HasARMResources {
-			codegen.ReplaceStage("stripUnreferenced", stripUnusedTypesPipelineStage())
+			codegen.ReplaceStage(pipeline.StripUnreferencedTypeDefinitionsStageID, stripUnusedTypesPipelineStage())
 		}
 
 	default:
 		return nil, errors.Errorf("unknown pipeline kind %q", string(genPipeline))
 	}
 
-	codegen.ReplaceStage("loadSchema", loadTestSchemaIntoTypes(idFactory, cfg, path))
-	codegen.ReplaceStage("exportPackages", exportPackagesTestPipelineStage(t, testName))
+	codegen.ReplaceStage(pipeline.LoadSchemaIntoTypesStageID, loadTestSchemaIntoTypes(idFactory, cfg, path))
+	codegen.ReplaceStage(pipeline.ExportPackagesStageID, exportPackagesTestPipelineStage(t, testName))
 
 	if testConfig.InjectEmbeddedStruct {
-		codegen.InjectStageAfter("removeAliases", injectEmbeddedStructType())
+		codegen.InjectStageAfter(pipeline.RemoveTypeAliasesStageID, injectEmbeddedStructType())
 	}
 
 	codegen.RemoveStages()
@@ -185,7 +196,7 @@ func loadTestSchemaIntoTypes(
 	path string) pipeline.Stage {
 	source := configuration.SchemaURL
 
-	return pipeline.MakeStage(
+	return pipeline.MakeLegacyStage(
 		"loadTestSchema",
 		"Load and walk schema (test)",
 		func(ctx context.Context, types astmodel.Types) (astmodel.Types, error) {
@@ -218,7 +229,7 @@ func loadTestSchemaIntoTypes(
 func exportPackagesTestPipelineStage(t *testing.T, testName string) pipeline.Stage {
 	g := goldie.New(t)
 
-	return pipeline.MakeStage(
+	return pipeline.MakeLegacyStage(
 		"exportTestPackages",
 		"Export packages for test",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
@@ -253,7 +264,7 @@ func exportPackagesTestPipelineStage(t *testing.T, testName string) pipeline.Sta
 			fileWriter := astmodel.NewGoSourceFileWriter(fileDef)
 			err := fileWriter.SaveToWriter(buf)
 			if err != nil {
-				t.Fatalf("could not generate file: %v", err)
+				t.Fatalf("could not generate file: %s", err)
 			}
 
 			g.Assert(t, testName, buf.Bytes())
@@ -263,7 +274,7 @@ func exportPackagesTestPipelineStage(t *testing.T, testName string) pipeline.Sta
 }
 
 func stripUnusedTypesPipelineStage() pipeline.Stage {
-	return pipeline.MakeStage(
+	return pipeline.MakeLegacyStage(
 		"stripUnused",
 		"Strip unused types for test",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
@@ -286,8 +297,8 @@ func stripUnusedTypesPipelineStage() pipeline.Stage {
 // TODO: we're hard-coding references, and even if we were sourcing them from Swagger
 // TODO: we have no way to give Swagger to the golden files tests currently.
 func addCrossResourceReferencesForTest(idFactory astmodel.IdentifierFactory) pipeline.Stage {
-	return pipeline.MakeStage(
-		"addCrossResourceReferences",
+	return pipeline.MakeLegacyStage(
+		pipeline.AddCrossResourceReferencesStageID,
 		"Add cross resource references for test",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
 			result := make(astmodel.Types)
@@ -335,7 +346,7 @@ func TestGolden(t *testing.T) {
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("Error enumerating files: %v", err)
+		t.Fatalf("Error enumerating files: %s", err)
 	}
 
 	// run all tests
@@ -350,7 +361,7 @@ func TestGolden(t *testing.T) {
 
 		testConfig, err := loadTestConfig(configPath)
 		if err != nil {
-			t.Fatalf("could not load test config: %v", err)
+			t.Fatalf("could not load test config: %s", err)
 		}
 
 		t.Run(groupName, func(t *testing.T) {

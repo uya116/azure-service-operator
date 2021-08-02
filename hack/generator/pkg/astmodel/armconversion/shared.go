@@ -7,6 +7,7 @@ package armconversion
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/dave/dst"
@@ -20,7 +21,7 @@ type conversionBuilder struct {
 	armTypeIdent               string
 	codeGenerationContext      *astmodel.CodeGenerationContext
 	idFactory                  astmodel.IdentifierFactory
-	isSpecType                 bool
+	typeKind                   TypeKind
 	methodName                 string
 	kubeType                   *astmodel.ObjectType
 	armType                    *astmodel.ObjectType
@@ -30,9 +31,9 @@ type conversionBuilder struct {
 type TypeKind int
 
 const (
-	OrdinaryType TypeKind = iota
-	SpecType
-	StatusType
+	TypeKindOrdinary TypeKind = iota
+	TypeKindSpec
+	TypeKindStatus
 )
 
 func (builder conversionBuilder) propertyConversionHandler(
@@ -46,7 +47,19 @@ func (builder conversionBuilder) propertyConversionHandler(
 		}
 	}
 
-	panic(fmt.Sprintf("No property found for %s in method %s\nFrom: %+v\nTo: %+v", toProp.PropertyName(), builder.methodName, *builder.kubeType, *builder.armType))
+	var kubeDescription strings.Builder
+	builder.kubeType.WriteDebugDescription(&kubeDescription, nil)
+
+	var armDescription strings.Builder
+	builder.armType.WriteDebugDescription(&armDescription, nil)
+
+	message := fmt.Sprintf(
+		"No property found for %q in method %s()\nFrom: %s\nTo: %s",
+		toProp.PropertyName(),
+		builder.methodName,
+		kubeDescription.String(),
+		armDescription.String())
+	panic(message)
 }
 
 type propertyConversionHandler = func(toProp *astmodel.PropertyDefinition, fromType *astmodel.ObjectType) []dst.Stmt
@@ -82,7 +95,7 @@ func getReceiverObjectType(codeGenerationContext *astmodel.CodeGenerationContext
 	receiverType, ok := rt.Type().(*astmodel.ObjectType)
 	if !ok {
 		// Don't expect to have any wrapper types left at this point
-		panic(fmt.Sprintf("receiver for ARMConversionFunction is not of expected type. TypeName: %v, Type %T", receiver, rt.Type()))
+		panic(fmt.Sprintf("receiver for ARMConversionFunction is not of expected type. TypeName: %s, Type %T", receiver, rt.Type()))
 	}
 
 	return receiverType
@@ -94,7 +107,7 @@ func generateTypeConversionAssignments(
 	propertyHandler func(toProp *astmodel.PropertyDefinition, fromType *astmodel.ObjectType) []dst.Stmt) []dst.Stmt {
 
 	var result []dst.Stmt
-	for _, toField := range toType.Properties() {
+	for _, toField := range toType.Properties().AsSlice() {
 		fieldConversionStmts := propertyHandler(toField, fromType)
 		if len(fieldConversionStmts) > 0 {
 			result = append(result, &dst.EmptyStmt{
@@ -129,14 +142,14 @@ func NewARMConversionImplementation(
 	typeKind TypeKind) *astmodel.InterfaceImplementation {
 
 	var convertToARMFunc *ConvertToARMFunction
-	if typeKind != StatusType {
+	if typeKind != TypeKindStatus {
 		// status type should not have ConvertToARM
 		convertToARMFunc = &ConvertToARMFunction{
 			ARMConversionFunction: ARMConversionFunction{
 				armTypeName: armTypeName,
 				armType:     armType,
 				idFactory:   idFactory,
-				isSpecType:  typeKind == SpecType,
+				typeKind:    typeKind,
 			},
 		}
 	}
@@ -146,7 +159,7 @@ func NewARMConversionImplementation(
 			armTypeName: armTypeName,
 			armType:     armType,
 			idFactory:   idFactory,
-			isSpecType:  typeKind == SpecType,
+			typeKind:    typeKind,
 		},
 	}
 

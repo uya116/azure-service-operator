@@ -25,6 +25,21 @@ func CheckErrorAndReturn(otherReturns ...dst.Expr) dst.Stmt {
 	return CheckErrorAndSingleStatement(retStmt)
 }
 
+// CheckErrorAndWrap checks if the err is non-nil, and if it is returns it, wrapped with additional information
+//
+// if err != nil {
+//      return errors.Wrapf(err, <message>, <args>)
+// }
+//
+func CheckErrorAndWrap(errorsPackage string, message string, args ...dst.Expr) dst.Stmt {
+	wrap := CallQualifiedFunc(
+		errorsPackage,
+		"Wrap",
+		Expressions(dst.NewIdent("err"), StringLiteral(message), args)...)
+
+	return CheckErrorAndSingleStatement(Returns(wrap))
+}
+
 // CheckErrorAndSingleStatement checks if the err is non-nil, and if it is executes the provided statement.
 //
 // 	if err != nil {
@@ -371,20 +386,19 @@ func Nil() *dst.Ident {
 }
 
 // StatementBlock generates a block containing the supplied statements
+// If we're given a single statement that's already a block, we won't double wrap it
 func StatementBlock(statements ...dst.Stmt) *dst.BlockStmt {
+	stmts := Statements(statements)
+
+	if len(stmts) == 1 {
+		if block, ok := stmts[0].(*dst.BlockStmt); ok {
+			return block
+		}
+	}
+
 	return &dst.BlockStmt{
-		List: Statements(statements),
+		List: stmts,
 	}
-}
-
-// EnsureStatementBlock wraps any statement into a block safely
-// (without double wrapping an existing block)
-func EnsureStatementBlock(statement dst.Stmt) *dst.BlockStmt {
-	if block, ok := statement.(*dst.BlockStmt); ok {
-		return block
-	}
-
-	return StatementBlock(statement)
 }
 
 // Statements creates a sequence of statements from the provided values, each of which may be a

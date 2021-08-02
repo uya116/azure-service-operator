@@ -15,7 +15,7 @@ import (
 
 // FlattenResources flattens any resources directly inside other resources
 func FlattenResources() Stage {
-	return MakeStage(
+	return MakeLegacyStage(
 		"flattenResources",
 		"Flatten nested resource types",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
@@ -44,7 +44,7 @@ func FlattenResources() Stage {
 
 				result, err := v.VisitDefinition(def, nil)
 				if err != nil {
-					return nil, errors.Wrapf(err, "error processing type %v", def.Name())
+					return nil, errors.Wrapf(err, "error processing type %s", def.Name())
 				}
 
 				results.Add(result)

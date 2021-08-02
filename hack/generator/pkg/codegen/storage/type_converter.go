@@ -7,9 +7,11 @@ package storage
 
 import (
 	"fmt"
-	"github.com/Azure/azure-service-operator/hack/generator/pkg/astmodel"
+
 	"github.com/pkg/errors"
 	kerrors "k8s.io/apimachinery/pkg/util/errors"
+
+	"github.com/Azure/azure-service-operator/hack/generator/pkg/astmodel"
 )
 
 // TypeConverter is used to create a storage variant of an API type
@@ -18,14 +20,19 @@ type TypeConverter struct {
 	visitor astmodel.TypeVisitor
 	// types contains all the types for this group
 	types astmodel.Types
+	// conversionGraph is the map of package conversions we use
+	conversionGraph *ConversionGraph
 	// propertyConverter is used to modify properties
 	propertyConverter *PropertyConverter
 }
 
 // NewTypeConverter creates a new instance of the utility type
-func NewTypeConverter(types astmodel.Types) *TypeConverter {
+func NewTypeConverter(
+	types astmodel.Types,
+	conversionGraph *ConversionGraph) *TypeConverter {
 	result := &TypeConverter{
 		types:             types,
+		conversionGraph:   conversionGraph,
 		propertyConverter: NewPropertyConverter(types),
 	}
 
@@ -44,7 +51,8 @@ func NewTypeConverter(types astmodel.Types) *TypeConverter {
 func (t *TypeConverter) ConvertDefinition(def astmodel.TypeDefinition) (astmodel.TypeDefinition, error) {
 	result, err := t.visitor.VisitDefinition(def, nil)
 	if err != nil {
-		return astmodel.TypeDefinition{}, errors.Wrapf(err, "converting %q for storage variant", def.Name())
+		// Don't need to wrap for context because all our callers do that with better precision
+		return astmodel.TypeDefinition{}, err
 	}
 
 	description := t.descriptionForStorageVariant(def)
@@ -64,10 +72,10 @@ func (t *TypeConverter) convertResourceType(
 	ctx interface{}) (astmodel.Type, error) {
 
 	// storage resource types do not need defaulter/validator interfaces, they have no webhooks
-	modifiedResource := resource.WithoutInterface(astmodel.DefaulterInterfaceName).
+	result := resource.WithoutInterface(astmodel.DefaulterInterfaceName).
 		WithoutInterface(astmodel.ValidatorInterfaceName)
 
-	return astmodel.IdentityVisitOfResourceType(tv, modifiedResource, ctx)
+	return astmodel.IdentityVisitOfResourceType(tv, result, ctx)
 }
 
 // convertObjectType creates a storage variation of an object type
@@ -75,7 +83,7 @@ func (t *TypeConverter) convertObjectType(
 	_ *astmodel.TypeVisitor, object *astmodel.ObjectType, _ interface{}) (astmodel.Type, error) {
 
 	var errs []error
-	properties := object.Properties()
+	properties := object.Properties().AsSlice()
 	for i, prop := range properties {
 		p, err := t.propertyConverter.ConvertProperty(prop)
 		if err != nil {
@@ -91,6 +99,7 @@ func (t *TypeConverter) convertObjectType(
 	}
 
 	objectType := astmodel.NewObjectType().WithProperties(properties...)
+
 	return astmodel.StorageFlag.ApplyTo(objectType), nil
 }
 
@@ -101,7 +110,8 @@ func (t *TypeConverter) redirectTypeNamesToStoragePackage(
 		return result, nil
 	}
 
-	return name, nil
+	// Failed to redirect into a storage package, return an error
+	return nil, errors.Errorf("unable to redirect %s into a storage package", name)
 }
 
 // stripAllValidations removes all validations
@@ -125,15 +135,14 @@ func (t *TypeConverter) stripAllFlags(
 	return astmodel.IdentityVisitOfFlaggedType(tv, flaggedType, ctx)
 }
 
-func (_ *TypeConverter) tryConvertToStoragePackage(name astmodel.TypeName) (astmodel.TypeName, bool) {
+func (t *TypeConverter) tryConvertToStoragePackage(name astmodel.TypeName) (astmodel.TypeName, bool) {
 	// Map the type name into our storage package
-	localRef, ok := name.PackageReference.AsLocalPackage()
+	ref, ok := t.conversionGraph.LookupTransition(name.PackageReference)
 	if !ok {
 		return astmodel.TypeName{}, false
 	}
 
-	storageRef := astmodel.MakeStoragePackageReference(localRef)
-	visitedName := astmodel.MakeTypeName(storageRef, name.Name())
+	visitedName := astmodel.MakeTypeName(ref, name.Name())
 	return visitedName, true
 }
 
@@ -143,7 +152,7 @@ func (_ *TypeConverter) descriptionForStorageVariant(definition astmodel.TypeDef
 	pkg := definition.Name().PackageReference.PackageName()
 
 	result := []string{
-		fmt.Sprintf("Storage version of %v.%v", pkg, definition.Name().Name()),
+		fmt.Sprintf("Storage version of %s.%s", pkg, definition.Name().Name()),
 	}
 	result = append(result, definition.Description()...)
 

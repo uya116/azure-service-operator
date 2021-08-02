@@ -8,20 +8,20 @@ package controllers_test
 import (
 	"testing"
 
+	. "github.com/onsi/gomega"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
 	network "github.com/Azure/azure-service-operator/hack/generated/_apis/microsoft.network/v1alpha1api20201101"
 	resources "github.com/Azure/azure-service-operator/hack/generated/_apis/microsoft.resources/v1alpha1api20200601"
 	storage "github.com/Azure/azure-service-operator/hack/generated/_apis/microsoft.storage/v1alpha1api20210401"
 	"github.com/Azure/azure-service-operator/hack/generated/pkg/reconcilers"
 	"github.com/Azure/azure-service-operator/hack/generated/pkg/testcommon"
-	. "github.com/onsi/gomega"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-func waitForOwnerMissingError(tc testcommon.KubePerTestContext, obj controllerutil.Object) {
-	objectKey, err := client.ObjectKeyFromObject(obj)
-	tc.Expect(err).ToNot(HaveOccurred())
+func waitForOwnerMissingError(tc testcommon.KubePerTestContext, obj client.Object) {
+	objectKey := client.ObjectKeyFromObject(obj)
 
 	tc.Eventually(func() string {
 		tc.GetResource(objectKey, obj)
@@ -29,9 +29,9 @@ func waitForOwnerMissingError(tc testcommon.KubePerTestContext, obj controllerut
 	}).Should(MatchRegexp("owner.*is not ready"))
 }
 
-func doNotWait(_ testcommon.KubePerTestContext, _ controllerutil.Object) {}
+func doNotWait(_ testcommon.KubePerTestContext, _ client.Object) {}
 
-func storageAccountAndResourceGroupProvisionedOutOfOrderHelper(t *testing.T, waitHelper func(tc testcommon.KubePerTestContext, obj controllerutil.Object)) {
+func storageAccountAndResourceGroupProvisionedOutOfOrderHelper(t *testing.T, waitHelper func(tc testcommon.KubePerTestContext, obj client.Object)) {
 	t.Parallel()
 
 	tc := globalTestContext.ForTest(t)
@@ -50,8 +50,8 @@ func storageAccountAndResourceGroupProvisionedOutOfOrderHelper(t *testing.T, wai
 			Location: tc.AzureRegion,
 			Owner:    testcommon.AsOwner(rg.ObjectMeta),
 			Kind:     storage.StorageAccountsSpecKindBlobStorage,
-			Sku: storage.StorageAccounts_Spec_Sku{
-				Name: storage.StorageAccountsSpecSkuNameStandardLRS,
+			Sku: storage.Sku{
+				Name: storage.SkuNameStandardLRS,
 			},
 			AccessTier: &accessTier,
 		},
@@ -70,7 +70,7 @@ func storageAccountAndResourceGroupProvisionedOutOfOrderHelper(t *testing.T, wai
 	tc.G.Eventually(acct, tc.RemainingTime()).Should(tc.Match.BeProvisioned())
 }
 
-func subnetAndVNETCreatedProvisionedOutOfOrder(t *testing.T, waitHelper func(tc testcommon.KubePerTestContext, obj controllerutil.Object)) {
+func subnetAndVNETCreatedProvisionedOutOfOrder(t *testing.T, waitHelper func(tc testcommon.KubePerTestContext, obj client.Object)) {
 	t.Parallel()
 
 	tc := globalTestContext.ForTest(t)
@@ -160,8 +160,8 @@ func Test_CreateStorageAccountThatAlreadyExists_ReconcilesSuccessfully(t *testin
 			Location: tc.AzureRegion,
 			Owner:    testcommon.AsOwner(rg.ObjectMeta),
 			Kind:     storage.StorageAccountsSpecKindBlobStorage,
-			Sku: storage.StorageAccounts_Spec_Sku{
-				Name: storage.StorageAccountsSpecSkuNameStandardLRS,
+			Sku: storage.Sku{
+				Name: storage.SkuNameStandardLRS,
 			},
 			AccessTier: &accessTier,
 		},

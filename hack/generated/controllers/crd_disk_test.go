@@ -49,12 +49,11 @@ func Test_Disk_CRUD(t *testing.T) {
 
 	// Perform a simple patch.
 	patcher := tc.NewResourcePatcher(disk)
-	networkAccessPolicy := compute.DisksSpecPropertiesNetworkAccessPolicyDenyAll
+	networkAccessPolicy := compute.DiskPropertiesNetworkAccessPolicyDenyAll
 	disk.Spec.NetworkAccessPolicy = &networkAccessPolicy
 	patcher.Patch(disk)
 
-	objectKey, err := client.ObjectKeyFromObject(disk)
-	tc.Expect(err).ToNot(HaveOccurred())
+	objectKey := client.ObjectKeyFromObject(disk)
 
 	// Ensure state eventually gets updated in k8s from change in Azure.
 	tc.Eventually(func() *compute.NetworkAccessPolicy_Status {

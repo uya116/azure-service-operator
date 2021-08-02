@@ -15,12 +15,15 @@ import (
 	"github.com/Azure/azure-service-operator/hack/generator/pkg/astmodel/armconversion"
 )
 
+// ApplyARMConversionInterfaceStageID is the unique identifier of this pipeline stage
+const ApplyARMConversionInterfaceStageID = "applyArmConversionInterface"
+
 // ApplyARMConversionInterface adds the genruntime.ARMTransformer interface and the Owner property
 // to all Kubernetes types.
 // The genruntime.ARMTransformer interface is used to convert from the Kubernetes type to the corresponding ARM type and back.
 func ApplyARMConversionInterface(idFactory astmodel.IdentifierFactory) Stage {
-	return MakeStage(
-		"applyArmConversionInterface",
+	return MakeLegacyStage(
+		ApplyARMConversionInterfaceStageID,
 		"Add ARM conversion interfaces to Kubernetes types",
 		func(ctx context.Context, definitions astmodel.Types) (astmodel.Types, error) {
 			converter := &armConversionApplier{
@@ -74,7 +77,7 @@ func (c *armConversionApplier) transformResourceSpecs() (astmodel.Types, error) 
 			return nil, err
 		}
 
-		specDefinition, err = c.addARMConversionInterface(specDefinition, armSpecDefinition, armconversion.SpecType)
+		specDefinition, err = c.addARMConversionInterface(specDefinition, armSpecDefinition, armconversion.TypeKindSpec)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +107,7 @@ func (c *armConversionApplier) transformResourceStatuses() (astmodel.Types, erro
 				return nil, err
 			}
 
-			statusDefinition, err := c.addARMConversionInterface(td, armStatusDefinition, armconversion.StatusType)
+			statusDefinition, err := c.addARMConversionInterface(td, armStatusDefinition, armconversion.TypeKindStatus)
 			if err != nil {
 				return nil, err
 			}
@@ -152,7 +155,7 @@ func (c *armConversionApplier) transformTypes() (astmodel.Types, error) {
 			return nil, err
 		}
 
-		modifiedDef, err := c.addARMConversionInterface(td, armDefinition, armconversion.OrdinaryType)
+		modifiedDef, err := c.addARMConversionInterface(td, armDefinition, armconversion.TypeKindOrdinary)
 		if err != nil {
 			return nil, errors.Wrapf(err, "failed to add ARM conversion interface to %q", td.Name())
 		}
@@ -236,7 +239,7 @@ func (c *armConversionApplier) addARMConversionInterface(
 	if err != nil {
 		emptyDef := astmodel.TypeDefinition{}
 		return emptyDef,
-			errors.Errorf("failed to add ARM conversion interface to Kubenetes object definition %v", armDef.Name())
+			errors.Errorf("failed to add ARM conversion interface to Kubenetes object definition %s", armDef.Name())
 	}
 
 	return result, nil

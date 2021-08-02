@@ -34,7 +34,7 @@ func NewObjectSerializationTestCase(
 	name astmodel.TypeName,
 	objectType *astmodel.ObjectType,
 	idFactory astmodel.IdentifierFactory) *ObjectSerializationTestCase {
-	testName := fmt.Sprintf("%v_WhenSerializedToJson_DeserializesAsEqual", name.Name())
+	testName := fmt.Sprintf("%s_WhenSerializedToJson_DeserializesAsEqual", name.Name())
 	return &ObjectSerializationTestCase{
 		testName:   testName,
 		subject:    name,
@@ -59,7 +59,7 @@ func (o ObjectSerializationTestCase) References() astmodel.TypeNameSet {
 // codeGenerationContext contains reference material to use when generating
 func (o ObjectSerializationTestCase) AsFuncs(name astmodel.TypeName, genContext *astmodel.CodeGenerationContext) []dst.Decl {
 	var errs []error
-	properties := o.makePropertyMap()
+	properties := o.objectType.Properties()
 
 	// Find all the simple generators (those with no external dependencies)
 	simpleGenerators := o.createGenerators(properties, genContext, o.createIndependentGenerator)
@@ -70,6 +70,10 @@ func (o ObjectSerializationTestCase) AsFuncs(name astmodel.TypeName, genContext 
 	// Remove properties from our runtime
 	o.removeByPackage(properties, astmodel.GenRuntimeReference)
 
+	// Remove API machinery properties
+	o.removeByPackage(properties, astmodel.APIMachineryRuntimeReference)
+	o.removeByPackage(properties, astmodel.APIMachinerySchemaReference)
+
 	// Temporarily remove properties related to support for Arbitrary JSON
 	// TODO: Add generators for these properties
 	o.removeByPackage(properties, astmodel.APIExtensionsReference)
@@ -77,14 +81,14 @@ func (o ObjectSerializationTestCase) AsFuncs(name astmodel.TypeName, genContext 
 
 	// Write errors for any properties we don't handle
 	for _, p := range properties {
-		errs = append(errs, errors.Errorf("no generator created for %v (%v)", p.PropertyName(), p.PropertyType()))
+		errs = append(errs, errors.Errorf("no generator created for %s (%s)", p.PropertyName(), p.PropertyType()))
 	}
 
 	var result []dst.Decl
 
 	if len(simpleGenerators) == 0 && len(relatedGenerators) == 0 {
 		// No properties that we can generate to test - skip the testing completely
-		errs = append(errs, errors.Errorf("no property generators for %v", name))
+		errs = append(errs, errors.Errorf("no property generators for %s", name))
 	} else {
 		result = append(result,
 			o.createTestRunner(genContext),
@@ -147,8 +151,15 @@ func (o ObjectSerializationTestCase) RequiredImports() *astmodel.PackageImportSe
 }
 
 // Equals determines if this TestCase is equal to another one
-func (o ObjectSerializationTestCase) Equals(_ astmodel.TestCase) bool {
-	panic("implement me")
+func (o ObjectSerializationTestCase) Equals(other astmodel.TestCase) bool {
+	otherTC, ok := other.(*ObjectSerializationTestCase)
+	if !ok {
+		return false
+	}
+
+	return o.testName == otherTC.testName &&
+		o.subject.Equals(otherTC.subject) &&
+		o.objectType.Equals(otherTC.objectType)
 }
 
 // createTestRunner generates the AST for the test runner itself
@@ -167,9 +178,8 @@ func (o ObjectSerializationTestCase) createTestRunner(codegenContext *astmodel.C
 	t := dst.NewIdent("t")
 
 	// parameters := gopter.DefaultTestParameters()
-	defineParameters := astbuilder.SimpleAssignment(
-		dst.NewIdent(parametersLocal),
-		token.DEFINE,
+	defineParameters := astbuilder.ShortDeclaration(
+		parametersLocal,
 		astbuilder.CallQualifiedFunc(gopterPackage, "DefaultTestParameters"))
 
 	// parameters.MaxSize = 10
@@ -180,13 +190,12 @@ func (o ObjectSerializationTestCase) createTestRunner(codegenContext *astmodel.C
 		astbuilder.IntLiteral(10))
 
 	// properties := gopter.NewProperties(parameters)
-	defineProperties := astbuilder.SimpleAssignment(
-		dst.NewIdent(propertiesLocal),
-		token.DEFINE,
+	defineProperties := astbuilder.ShortDeclaration(
+		propertiesLocal,
 		astbuilder.CallQualifiedFunc(gopterPackage, "NewProperties", dst.NewIdent(parametersLocal)))
 
 	// partial expression: description of the test
-	testName := astbuilder.StringLiteralf("Round trip of %v via JSON returns original", o.Subject())
+	testName := astbuilder.StringLiteralf("Round trip of %s via JSON returns original", o.Subject())
 
 	// partial expression: prop.ForAll(RunTestForX, XGenerator())
 	propForAll := astbuilder.CallQualifiedFunc(
@@ -254,7 +263,6 @@ func (o ObjectSerializationTestCase) createTestMethod(codegenContext *astmodel.C
 	// err = json.Unmarshal(bin, &actual)
 	deserialize := astbuilder.SimpleAssignment(
 		dst.NewIdent("err"),
-		token.ASSIGN,
 		astbuilder.CallQualifiedFunc(jsonPackage, "Unmarshal",
 			dst.NewIdent(binId),
 			&dst.UnaryExpr{
@@ -269,9 +277,8 @@ func (o ObjectSerializationTestCase) createTestMethod(codegenContext *astmodel.C
 
 	// match := cmp.Equal(subject, actual, cmpopts.EquateEmpty())
 	equateEmpty := astbuilder.CallQualifiedFunc(cmpoptsPackage, "EquateEmpty")
-	compare := astbuilder.SimpleAssignment(
-		dst.NewIdent(matchId),
-		token.DEFINE,
+	compare := astbuilder.ShortDeclaration(
+		matchId,
 		astbuilder.CallQualifiedFunc(cmpPackage, "Equal",
 			dst.NewIdent(subjectId),
 			dst.NewIdent(actualId),
@@ -285,17 +292,14 @@ func (o ObjectSerializationTestCase) createTestMethod(codegenContext *astmodel.C
 		},
 		Body: &dst.BlockStmt{
 			List: []dst.Stmt{
-				astbuilder.SimpleAssignment(
-					dst.NewIdent(actualFmtId),
-					token.DEFINE,
+				astbuilder.ShortDeclaration(
+					actualFmtId,
 					astbuilder.CallQualifiedFunc(prettyPackage, "Sprint", dst.NewIdent(actualId))),
-				astbuilder.SimpleAssignment(
-					dst.NewIdent(subjectFmtId),
-					token.DEFINE,
+				astbuilder.ShortDeclaration(
+					subjectFmtId,
 					astbuilder.CallQualifiedFunc(prettyPackage, "Sprint", dst.NewIdent(subjectId))),
-				astbuilder.SimpleAssignment(
-					dst.NewIdent(resultId),
-					token.DEFINE,
+				astbuilder.ShortDeclaration(
+					resultId,
 					astbuilder.CallQualifiedFunc(diffPackage, "Diff", dst.NewIdent(subjectFmtId), dst.NewIdent(actualFmtId))),
 				astbuilder.Returns(dst.NewIdent(resultId)),
 			},
@@ -326,7 +330,7 @@ func (o ObjectSerializationTestCase) createTestMethod(codegenContext *astmodel.C
 	}
 	fn.AddParameter("subject", o.Subject())
 	fn.AddComments(fmt.Sprintf(
-		"runs a test to see if a specific instance of %v round trips to JSON and back losslessly",
+		"runs a test to see if a specific instance of %s round trips to JSON and back losslessly",
 		o.Subject()))
 
 	return fn.DefineFunc()
@@ -334,7 +338,7 @@ func (o ObjectSerializationTestCase) createTestMethod(codegenContext *astmodel.C
 
 func (o ObjectSerializationTestCase) createGeneratorDeclaration(genContext *astmodel.CodeGenerationContext) dst.Decl {
 	comment := fmt.Sprintf(
-		"Generator of %v instances for property testing - lazily instantiated by %v()",
+		"Generator of %s instances for property testing - lazily instantiated by %s()",
 		o.Subject(),
 		o.idOfGeneratorMethod(o.subject))
 
@@ -363,8 +367,8 @@ func (o ObjectSerializationTestCase) createGeneratorMethod(ctx *astmodel.CodeGen
 	}
 
 	fn.AddComments(
-		fmt.Sprintf("returns a generator of %v instances for property testing.", o.Subject()),
-		fmt.Sprintf("We first initialize %v with a simplified generator based on the fields with primitive types", o.idOfSubjectGeneratorGlobal()),
+		fmt.Sprintf("returns a generator of %s instances for property testing.", o.Subject()),
+		fmt.Sprintf("We first initialize %s with a simplified generator based on the fields with primitive types", o.idOfSubjectGeneratorGlobal()),
 		"then replacing it with a more complex one that also handles complex fields.",
 		"This ensures any cycles in the object graph properly terminate.",
 		"The call to gen.Struct() captures the map, so we have to create a new one for the second generator.")
@@ -379,9 +383,8 @@ func (o ObjectSerializationTestCase) createGeneratorMethod(ctx *astmodel.CodeGen
 		// Create a simple version of the generator that does not reference generators for related types
 		// This serves to terminate any dependency cycles that might occur during creation of a more fully fledged generator
 
-		makeIndependentMap := astbuilder.SimpleAssignment(
-			dst.NewIdent("independentGenerators"),
-			token.DEFINE,
+		makeIndependentMap := astbuilder.ShortDeclaration(
+			"independentGenerators",
 			astbuilder.MakeMap(
 				dst.NewIdent("string"),
 				astbuilder.QualifiedTypeName(gopterPackage, "Gen")))
@@ -392,7 +395,6 @@ func (o ObjectSerializationTestCase) createGeneratorMethod(ctx *astmodel.CodeGen
 
 		createIndependentGenerator := astbuilder.SimpleAssignment(
 			dst.NewIdent(o.idOfSubjectGeneratorGlobal()),
-			token.ASSIGN,
 			astbuilder.CallQualifiedFunc(
 				genPackage,
 				"Struct",
@@ -407,9 +409,8 @@ func (o ObjectSerializationTestCase) createGeneratorMethod(ctx *astmodel.CodeGen
 		// Have to call the factory method twice as the simple generator above has captured the map;
 		// if we reuse or modify the map, chaos ensues.
 
-		makeAllMap := astbuilder.SimpleAssignment(
-			dst.NewIdent("allGenerators"),
-			token.DEFINE,
+		makeAllMap := astbuilder.ShortDeclaration(
+			"allGenerators",
 			astbuilder.MakeMap(
 				dst.NewIdent("string"),
 				astbuilder.QualifiedTypeName(gopterPackage, "Gen")))
@@ -429,7 +430,6 @@ func (o ObjectSerializationTestCase) createGeneratorMethod(ctx *astmodel.CodeGen
 
 		createFullGenerator := astbuilder.SimpleAssignment(
 			dst.NewIdent(o.idOfSubjectGeneratorGlobal()),
-			token.ASSIGN,
 			astbuilder.CallQualifiedFunc(
 				genPackage,
 				"Struct",
@@ -500,7 +500,7 @@ func (o ObjectSerializationTestCase) createGenerators(
 				gensIdent,
 				&dst.BasicLit{
 					Kind:  token.STRING,
-					Value: fmt.Sprintf("\"%v\"", prop.PropertyName()),
+					Value: fmt.Sprintf("\"%s\"", prop.PropertyName()),
 				},
 				g)
 			result = append(result, insert)
@@ -657,40 +657,32 @@ func (o *ObjectSerializationTestCase) removeByPackage(
 	}
 }
 
-func (o *ObjectSerializationTestCase) makePropertyMap() map[astmodel.PropertyName]*astmodel.PropertyDefinition {
-	result := make(map[astmodel.PropertyName]*astmodel.PropertyDefinition)
-	for _, prop := range o.objectType.Properties() {
-		result[prop.PropertyName()] = prop
-	}
-	return result
-}
-
 func (o ObjectSerializationTestCase) idOfSubjectGeneratorGlobal() string {
 	return o.idOfGeneratorGlobal(o.subject)
 }
 
 func (o ObjectSerializationTestCase) idOfTestMethod() string {
 	return o.idFactory.CreateIdentifier(
-		fmt.Sprintf("RunTestFor%v", o.Subject()),
+		fmt.Sprintf("RunTestFor%s", o.Subject()),
 		astmodel.Exported)
 }
 
 func (o ObjectSerializationTestCase) idOfGeneratorGlobal(name astmodel.TypeName) string {
 	return o.idFactory.CreateIdentifier(
-		fmt.Sprintf("cached%vGenerator", name.Name()),
+		fmt.Sprintf("cached%sGenerator", name.Name()),
 		astmodel.NotExported)
 }
 
 func (o ObjectSerializationTestCase) idOfGeneratorMethod(typeName astmodel.TypeName) string {
 	name := o.idFactory.CreateIdentifier(
-		fmt.Sprintf("%vGenerator", typeName.Name()),
+		fmt.Sprintf("%sGenerator", typeName.Name()),
 		astmodel.Exported)
 	return name
 }
 
 func (o ObjectSerializationTestCase) idOfIndependentGeneratorsFactoryMethod() string {
 	return o.idFactory.CreateIdentifier(
-		fmt.Sprintf("AddIndependentPropertyGeneratorsFor%v", o.Subject()),
+		fmt.Sprintf("AddIndependentPropertyGeneratorsFor%s", o.Subject()),
 		astmodel.Exported)
 }
 
@@ -698,7 +690,7 @@ func (o ObjectSerializationTestCase) idOfIndependentGeneratorsFactoryMethod() st
 // other types
 func (o ObjectSerializationTestCase) idOfRelatedGeneratorsFactoryMethod() string {
 	return o.idFactory.CreateIdentifier(
-		fmt.Sprintf("AddRelatedPropertyGeneratorsFor%v", o.Subject()),
+		fmt.Sprintf("AddRelatedPropertyGeneratorsFor%s", o.Subject()),
 		astmodel.Exported)
 }
 

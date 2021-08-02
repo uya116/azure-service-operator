@@ -30,7 +30,7 @@ var (
 
 // ConvertAllOfAndOneOfToObjects reduces the AllOfType and OneOfType to ObjectType
 func ConvertAllOfAndOneOfToObjects(idFactory astmodel.IdentifierFactory) Stage {
-	return MakeStage(
+	return MakeLegacyStage(
 		"allof-anyof-objects",
 		"Convert allOf and oneOf to object types",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
@@ -108,7 +108,7 @@ func ConvertAllOfAndOneOfToObjects(idFactory astmodel.IdentifierFactory) Stage {
 
 				transformed, err := visitor.VisitDefinition(def, resourceUpdater)
 				if err != nil {
-					return nil, errors.Wrapf(err, "error processing type %v", def.Name())
+					return nil, errors.Wrapf(err, "error processing type %s", def.Name())
 				}
 
 				result.Add(transformed)
@@ -149,7 +149,6 @@ func (ns propertyNames) betterThan(other propertyNames) bool {
 }
 
 func (s synthesizer) getOneOfPropNames(oneOf *astmodel.OneOfType) ([]propertyNames, error) {
-
 	var result []propertyNames
 
 	err := oneOf.Types().ForEachError(func(t astmodel.Type, ix int) error {
@@ -177,14 +176,14 @@ func (s synthesizer) getOneOfName(t astmodel.Type, propIndex int) (propertyNames
 	case *astmodel.EnumType:
 		// JSON name is unimportant here because we will implement the JSON marshaller anyway,
 		// but we still need it for controller-gen
-		name := fmt.Sprintf("enum%v", propIndex)
+		name := fmt.Sprintf("enum%d", propIndex)
 		return propertyNames{
 			golang:     s.idFactory.CreatePropertyName(name, astmodel.Exported),
 			json:       s.idFactory.CreateIdentifier(name, astmodel.NotExported),
 			isGoodName: false, // TODO: This name sucks but what alternative do we have?
 		}, nil
 	case *astmodel.ObjectType:
-		name := fmt.Sprintf("object%v", propIndex)
+		name := fmt.Sprintf("object%d", propIndex)
 		return propertyNames{
 			golang:     s.idFactory.CreatePropertyName(name, astmodel.Exported),
 			json:       s.idFactory.CreateIdentifier(name, astmodel.NotExported),
@@ -203,14 +202,14 @@ func (s synthesizer) getOneOfName(t astmodel.Type, propIndex int) (propertyNames
 			primitiveTypeName = concreteType.Name()
 		}
 
-		name := fmt.Sprintf("%v%v", primitiveTypeName, propIndex)
+		name := fmt.Sprintf("%s%d", primitiveTypeName, propIndex)
 		return propertyNames{
 			golang:     s.idFactory.CreatePropertyName(name, astmodel.Exported),
 			json:       s.idFactory.CreateIdentifier(name, astmodel.NotExported),
 			isGoodName: false, // TODO: This name sucks but what alternative do we have?
 		}, nil
 	case *astmodel.ResourceType:
-		name := fmt.Sprintf("resource%v", propIndex)
+		name := fmt.Sprintf("resource%d", propIndex)
 		return propertyNames{
 			golang:     s.idFactory.CreatePropertyName(name, astmodel.Exported),
 			json:       s.idFactory.CreateIdentifier(name, astmodel.NotExported),
@@ -231,7 +230,6 @@ func (s synthesizer) getOneOfName(t astmodel.Type, propIndex int) (propertyNames
 
 			return nil
 		})
-
 		if err != nil {
 			return propertyNames{}, err
 		}
@@ -399,7 +397,7 @@ func (s synthesizer) handleMapMap(leftMap *astmodel.MapType, rightMap *astmodel.
 		return nil, err
 	}
 
-	return astmodel.NewMapType(keyType, valueType), nil
+	return leftMap.WithKeyType(keyType).WithValueType(valueType), nil
 }
 
 // intersection of array types is array of intersection of their element types
@@ -409,7 +407,7 @@ func (s synthesizer) handleArrayArray(leftArray *astmodel.ArrayType, rightArray 
 		return nil, err
 	}
 
-	return astmodel.NewArrayType(intersected), nil
+	return leftArray.WithElement(intersected), nil
 }
 
 func (s synthesizer) handleObjectObject(leftObj *astmodel.ObjectType, rightObj *astmodel.ObjectType) (astmodel.Type, error) {
@@ -423,9 +421,9 @@ func (s synthesizer) handleObjectObject(leftObj *astmodel.ObjectType, rightObj *
 		if existingProp, ok := mergedProps[p.PropertyName()]; ok {
 			newType, err := s.intersectTypes(existingProp.PropertyType(), p.PropertyType())
 			if err != nil {
-				klog.Errorf("unable to combine properties: %s (%v)", p.PropertyName(), err)
+				klog.Errorf("unable to combine properties: %s (%s)", p.PropertyName(), err)
 				continue
-				//return nil, err
+				// return nil, err
 			}
 
 			// TODO: need to handle merging requiredness and tags and...
@@ -515,7 +513,6 @@ func (s synthesizer) handleOneOf(leftOneOf *astmodel.OneOfType, right astmodel.T
 		newTypes = append(newTypes, newType)
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -569,6 +566,11 @@ func (synthesizer) handleValidatedAndNonValidated(validated *astmodel.ValidatedT
 		return validated, nil
 	}
 
+	// validated(optional(T)) combined with a non-optional T becomes validated(T)
+	if validated.ElementType().Equals(astmodel.NewOptionalType(right)) {
+		return validated.WithElement(right), nil
+	}
+
 	return nil, nil
 }
 
@@ -590,14 +592,12 @@ func (synthesizer) handleMapObject(leftMap *astmodel.MapType, rightObj *astmodel
 
 // makes an ObjectType for an AllOf type
 func (s synthesizer) allOfObject(allOf *astmodel.AllOfType) (astmodel.Type, error) {
-
 	var intersection astmodel.Type = astmodel.AnyType
 	err := allOf.Types().ForEachError(func(t astmodel.Type, _ int) error {
 		var err error
 		intersection, err = s.intersectTypes(intersection, t)
 		return err
 	})
-
 	if err != nil {
 		return nil, err
 	}

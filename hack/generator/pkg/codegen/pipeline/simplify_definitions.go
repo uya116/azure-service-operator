@@ -16,7 +16,7 @@ import (
 
 // SimplifyDefinitions creates a pipeline stage that removes any wrapper types prior to actual code generation
 func SimplifyDefinitions() Stage {
-	return MakeStage(
+	return MakeLegacyStage(
 		"simplifyDefinitions",
 		"Flatten definitions by removing wrapper types",
 		func(ctx context.Context, defs astmodel.Types) (astmodel.Types, error) {
@@ -30,7 +30,7 @@ func SimplifyDefinitions() Stage {
 				} else {
 					result.Add(d)
 					if !def.Type().Equals(d.Type()) {
-						klog.V(3).Infof("Simplified %v from %v to %v", def.Name(), def.Type(), d.Type())
+						klog.V(3).Infof("Simplified %s from %s to %s", def.Name(), def.Type(), d.Type())
 					}
 				}
 			}

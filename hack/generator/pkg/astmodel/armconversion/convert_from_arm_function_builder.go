@@ -45,7 +45,7 @@ func newConvertFromARMFunctionBuilder(
 			receiverTypeExpr:      receiver.AsType(codeGenerationContext),
 			armTypeIdent:          c.armTypeName.Name(),
 			idFactory:             c.idFactory,
-			isSpecType:            c.isSpecType,
+			typeKind:              c.typeKind,
 			codeGenerationContext: codeGenerationContext,
 		},
 		typeConversionBuilder: astmodel.NewConversionFunctionBuilder(c.idFactory, codeGenerationContext),
@@ -156,7 +156,7 @@ func (builder *convertFromARMBuilder) namePropertyHandler(
 	toProp *astmodel.PropertyDefinition,
 	fromType *astmodel.ObjectType) []dst.Stmt {
 
-	if !builder.isSpecType || !toProp.HasName(astmodel.AzureNameProperty) {
+	if builder.typeKind != TypeKindSpec || !toProp.HasName(astmodel.AzureNameProperty) {
 		return nil
 	}
 
@@ -206,7 +206,7 @@ func (builder *convertFromARMBuilder) ownerPropertyHandler(
 	toProp *astmodel.PropertyDefinition,
 	_ *astmodel.ObjectType) []dst.Stmt {
 
-	if toProp.PropertyName() != builder.idFactory.CreatePropertyName(astmodel.OwnerProperty, astmodel.Exported) || !builder.isSpecType {
+	if toProp.PropertyName() != builder.idFactory.CreatePropertyName(astmodel.OwnerProperty, astmodel.Exported) || builder.typeKind != TypeKindSpec {
 		return nil
 	}
 
@@ -431,7 +431,7 @@ func (builder *convertFromARMBuilder) convertComplexTypeNameProperty(conversionB
 	results = append(results, newVariable)
 	results = append(
 		results,
-		astbuilder.SimpleAssignment(
+		astbuilder.AssignmentStatement(
 			dst.NewIdent("err"),
 			tok,
 			astbuilder.CallQualifiedFunc(
@@ -442,7 +442,6 @@ func (builder *convertFromARMBuilder) convertComplexTypeNameProperty(conversionB
 			results,
 			astbuilder.SimpleAssignment(
 				params.GetDestination(),
-				token.ASSIGN,
 				dst.NewIdent(propertyLocalVar)))
 	} else {
 		results = append(

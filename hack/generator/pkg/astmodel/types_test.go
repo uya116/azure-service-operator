@@ -50,9 +50,7 @@ func Test_TypesAddAll_GivenTypes_ModifiesSet(t *testing.T) {
 	g := NewGomegaWithT(t)
 
 	types := createTestTypes(alphaDefinition, betaDefinition)
-	otherTypes := []TypeDefinition{gammaDefinition, deltaDefinition}
-
-	types.AddAll(otherTypes)
+	types.AddAll(gammaDefinition, deltaDefinition)
 
 	g.Expect(types).To(ContainElements(gammaDefinition, deltaDefinition))
 }
@@ -61,9 +59,7 @@ func Test_TypesAddAll_GivenOverlappingTypes_Panics(t *testing.T) {
 	g := NewGomegaWithT(t)
 
 	types := createTestTypes(alphaDefinition, betaDefinition)
-	otherTypes := []TypeDefinition{betaDefinition, deltaDefinition}
-
-	g.Expect(func() { types.AddAll(otherTypes) }).To(Panic())
+	g.Expect(func() { types.AddAll(betaDefinition, deltaDefinition) }).To(Panic())
 }
 
 /*
@@ -180,6 +176,48 @@ func Test_TypesOverlayWith_GivenOverlappingSets_PrefersTypeInOverlay(t *testing.
 }
 
 /*
+ * FindSpecTypes() tests
+ */
+
+func TestFindSpecTypes(t *testing.T) {
+	g := NewGomegaWithT(t)
+
+	// Define a test resource
+	spec := createTestSpec("Person", fullNameProperty, knownAsProperty)
+	status := createTestStatus("Person")
+	resource := createTestResource("Person", spec, status)
+
+	types := make(Types)
+	types.AddAll(resource, status, spec)
+
+	specs := FindSpecTypes(types)
+
+	g.Expect(specs).To(HaveLen(1))
+	g.Expect(specs.Contains(spec.Name())).To(BeTrue())
+}
+
+/*
+ * FindStatusTypes() tests
+ */
+
+func TestFindStatusTypes(t *testing.T) {
+	g := NewGomegaWithT(t)
+
+	// Define a test resource
+	spec := createTestSpec("Person", fullNameProperty, knownAsProperty)
+	status := createTestStatus("Person")
+	resource := createTestResource("Person", spec, status)
+
+	types := make(Types)
+	types.AddAll(resource, status, spec)
+
+	statuses := FindStatusTypes(types)
+
+	g.Expect(statuses).To(HaveLen(1))
+	g.Expect(statuses.Contains(status.Name())).To(BeTrue())
+}
+
+/*
  * Utility functions
  */
 
@@ -195,4 +233,33 @@ func createTestTypes(defs ...TypeDefinition) Types {
 	}
 
 	return result
+}
+
+// CreateTestResource makes a resource for testing
+func createTestResource(
+	name string,
+	spec TypeDefinition,
+	status TypeDefinition) TypeDefinition {
+
+	resourceType := NewResourceType(spec.Name(), status.Name())
+	return MakeTypeDefinition(MakeTypeName(pkg, name), resourceType)
+}
+
+// createTestSpec makes a spec for testing
+func createTestSpec(
+	name string,
+	properties ...*PropertyDefinition) TypeDefinition {
+	specName := MakeTypeName(pkg, name+"_Spec")
+	return MakeTypeDefinition(
+		specName,
+		NewObjectType().WithProperties(properties...))
+}
+
+// createTestStatus makes a status for testing
+func createTestStatus(name string) TypeDefinition {
+	statusProperty := NewPropertyDefinition("Status", "status", StringType)
+	statusName := MakeTypeName(pkg, name+"_Status")
+	return MakeTypeDefinition(
+		statusName,
+		NewObjectType().WithProperties(statusProperty))
 }

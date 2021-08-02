@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/gobuffalo/envy"
 	"k8s.io/client-go/kubernetes/scheme"
 	kscheme "k8s.io/client-go/kubernetes/scheme"
@@ -48,7 +50,7 @@ import (
 	mysqlDatabaseManager "github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/database"
 	mysqlFirewallManager "github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/firewallrule"
 	"github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/mysqlaaduser"
-	mysqluser "github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/mysqluser"
+	"github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/mysqluser"
 	mysqlServerManager "github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/server"
 	mysqlvnetrule "github.com/Azure/azure-service-operator/pkg/resourcemanager/mysql/vnetrule"
 	resourcemanagernic "github.com/Azure/azure-service-operator/pkg/resourcemanager/nic"
@@ -68,7 +70,7 @@ import (
 	"github.com/Azure/azure-service-operator/pkg/resourcemanager/vmss"
 	resourcemanagervnet "github.com/Azure/azure-service-operator/pkg/resourcemanager/vnet"
 	k8sSecrets "github.com/Azure/azure-service-operator/pkg/secrets/kube"
-	telemetry "github.com/Azure/azure-service-operator/pkg/telemetry"
+	"github.com/Azure/azure-service-operator/pkg/telemetry"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -115,7 +117,7 @@ func setup() error {
 		testEnv = &envtest.Environment{
 			CRDDirectoryPaths: []string{filepath.Join("..", "config", "crd", "bases")},
 			WebhookInstallOptions: envtest.WebhookInstallOptions{
-				DirectoryPaths: []string{
+				Paths: []string{
 					"../config/webhook",
 				},
 			},
@@ -722,6 +724,7 @@ func setup() error {
 				config.GlobalCredentials(),
 				secretClient,
 				k8sManager.GetScheme(),
+				k8sManager.GetClient(),
 			),
 			Telemetry: telemetry.InitializeTelemetryDefault(
 				"MySQLServer",
@@ -938,7 +941,7 @@ func setup() error {
 	if result.Response.StatusCode != 204 {
 		_, err = resourceGroupManager.CreateGroup(context.Background(), resourceGroupName, resourceGroupLocation)
 		if err != nil {
-			return fmt.Errorf("ResourceGroup creation failed: %v", err)
+			return errors.Wrap(err, "resource creation failed")
 		}
 	}
 
@@ -1012,7 +1015,7 @@ func TestMain(m *testing.M) {
 
 	err = setup()
 	if err != nil {
-		log.Println(fmt.Sprintf("could not set up environment: %v\n", err))
+		log.Println(fmt.Sprintf("could not set up environment: %s\n", err))
 		os.Exit(1)
 	}
 
@@ -1020,7 +1023,7 @@ func TestMain(m *testing.M) {
 
 	err = teardown()
 	if err != nil {
-		log.Println(fmt.Sprintf("could not tear down environment: %v\n; original exit code: %v\n", err, code))
+		log.Println(fmt.Sprintf("could not tear down environment: %s\n; original exit code: %d\n", err, code))
 	}
 
 	os.Exit(code)
@@ -1028,7 +1031,7 @@ func TestMain(m *testing.M) {
 
 func PanicRecover(t *testing.T) {
 	if err := recover(); err != nil {
-		t.Logf("caught panic in test: %v", err)
+		t.Logf("caught panic in test: %s", err)
 		t.Logf("stacktrace from panic: \n%s", string(debug.Stack()))
 		t.Fail()
 	}

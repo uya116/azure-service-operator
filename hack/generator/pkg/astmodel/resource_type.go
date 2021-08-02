@@ -24,7 +24,7 @@ type ResourceType struct {
 	status           Type
 	isStorageVersion bool
 	owner            *TypeName
-	properties       map[PropertyName]*PropertyDefinition
+	properties       PropertySet
 	functions        map[string]Function
 	testcases        map[string]TestCase
 	InterfaceImplementer
@@ -35,7 +35,7 @@ func NewResourceType(specType Type, statusType Type) *ResourceType {
 	result := &ResourceType{
 		isStorageVersion:     false,
 		owner:                nil,
-		properties:           make(map[PropertyName]*PropertyDefinition),
+		properties:           make(PropertySet),
 		functions:            make(map[string]Function),
 		testcases:            make(map[string]TestCase),
 		InterfaceImplementer: MakeInterfaceImplementer(),
@@ -153,6 +153,9 @@ func (resource *ResourceType) IsStorageVersion() bool {
 
 // WithSpec returns a new resource that has the specified spec type
 func (resource *ResourceType) WithSpec(specType Type) *ResourceType {
+	if TypeEquals(resource.spec, specType) {
+		return resource // short-circuit
+	}
 
 	if specResource, ok := specType.(*ResourceType); ok {
 		// type is a resource, take its SpecType instead
@@ -167,6 +170,9 @@ func (resource *ResourceType) WithSpec(specType Type) *ResourceType {
 
 // WithStatus returns a new resource that has the specified status type
 func (resource *ResourceType) WithStatus(statusType Type) *ResourceType {
+	if TypeEquals(resource.status, statusType) {
+		return resource // short-circuit
+	}
 
 	if specResource, ok := statusType.(*ResourceType); ok {
 		// type is a resource, take its StatusType instead
@@ -286,7 +292,6 @@ func (resource *ResourceType) Equals(other Type) bool {
 // EmbeddedProperties returns all the embedded properties for this resource type
 // An ordered slice is returned to preserve immutability and provide determinism
 func (resource *ResourceType) EmbeddedProperties() []*PropertyDefinition {
-
 	typeMetaType := MakeTypeName(MetaV1PackageReference, "TypeMeta")
 	typeMetaProperty := NewPropertyDefinition("", "", typeMetaType).
 		WithTag("json", "inline")
@@ -329,25 +334,13 @@ func (resource *ResourceType) WithoutProperty(name PropertyName) *ResourceType {
 }
 
 // Properties returns all the properties from this resource type
-// An ordered slice is returned to preserve immutability and provide determinism
-func (resource *ResourceType) Properties() []*PropertyDefinition {
+func (resource *ResourceType) Properties() PropertySet {
+	result := resource.properties.Copy()
 
-	result := []*PropertyDefinition{
-		resource.createSpecProperty(),
-	}
-
+	result.Add(resource.createSpecProperty())
 	if resource.status != nil {
-		result = append(result, resource.createStatusProperty())
+		result.Add(resource.createStatusProperty())
 	}
-
-	for _, property := range resource.properties {
-		result = append(result, property)
-	}
-
-	// Sorted so that it's always consistent
-	sort.Slice(result, func(left int, right int) bool {
-		return result[left].propertyName < result[right].propertyName
-	})
 
 	return result
 }
@@ -380,7 +373,6 @@ func (resource *ResourceType) Property(name PropertyName) (*PropertyDefinition, 
 // Functions returns all the function implementations
 // A sorted slice is returned to preserve immutability and provide determinism
 func (resource *ResourceType) Functions() []Function {
-
 	var functions []Function
 	for _, f := range resource.functions {
 		functions = append(functions, f)
@@ -391,6 +383,12 @@ func (resource *ResourceType) Functions() []Function {
 	})
 
 	return functions
+}
+
+// HasFunctionWithName determines if this resource has a function with the given name
+func (resource *ResourceType) HasFunctionWithName(name string) bool {
+	_, ok := resource.functions[name]
+	return ok
 }
 
 // References returns the types referenced by Status or Spec parts of the resource
@@ -460,7 +458,7 @@ func (resource *ResourceType) AsDeclarations(codeGenerationContext *CodeGenerati
 		}
 	}
 
-	for _, property := range resource.Properties() {
+	for _, property := range resource.Properties().AsSlice() {
 		f := property.AsField(codeGenerationContext)
 		if f != nil {
 			fields = append(fields, f)

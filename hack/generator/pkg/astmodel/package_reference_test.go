@@ -29,6 +29,8 @@ func TestSortPackageReferencesByPathAndVersion(t *testing.T) {
 }
 
 func TestComparePackageReferencesByPathAndVersion(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name     string
 		left     string
@@ -74,6 +76,8 @@ func TestComparePackageReferencesByPathAndVersion(t *testing.T) {
 }
 
 func TestVersionComparerCompareNumeric(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name     string
 		left     string
@@ -101,6 +105,32 @@ func TestVersionComparerCompareNumeric(t *testing.T) {
 			}
 
 			g.Expect(comparer.compareNumeric()).To(Equal(c.expected))
+		})
+	}
+}
+
+func TestContainsPreviewVersionLabel(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		version  string
+		expected bool
+	}{
+		{"Non-preview", "v20200201", false},
+		{"Alpha", "v20200201alpha", true},
+		{"Beta", "v20200201beta", true},
+		{"Preview", "v20200201preview", true},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			g := NewGomegaWithT(t)
+
+			isPreview := containsPreviewVersionLabel(c.version)
+			g.Expect(isPreview).To(Equal(c.expected))
 		})
 	}
 }

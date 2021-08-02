@@ -134,14 +134,17 @@ func DefaultSchemaLoader(ctx context.Context, rewrite *config.RewriteRule, sourc
 	return schema, nil
 }
 
+// LoadSchemaIntoTypesStageID is the unique identifier for this pipeline stage
+const LoadSchemaIntoTypesStageID = "loadSchema"
+
 func LoadSchemaIntoTypes(
 	idFactory astmodel.IdentifierFactory,
 	configuration *config.Configuration,
 	schemaLoader schemaLoader) Stage {
 	source := configuration.SchemaURL
 
-	return MakeStage(
-		"loadSchema",
+	return MakeLegacyStage(
+		LoadSchemaIntoTypesStageID,
 		"Load and walk schema",
 		func(ctx context.Context, types astmodel.Types) (astmodel.Types, error) {
 			klog.V(0).Infof("Loading JSON schema %q", source)

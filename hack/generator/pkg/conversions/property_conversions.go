@@ -145,6 +145,12 @@ func CreateTypeConversion(
 	return nil, err
 }
 
+// NameOfPropertyAssignmentFunction returns the name of the property assignment function
+func NameOfPropertyAssignmentFunction(name astmodel.TypeName, direction Direction, idFactory astmodel.IdentifierFactory) string {
+	nameOfOtherType := idFactory.CreateIdentifier(name.Name(), astmodel.Exported)
+	return "AssignProperties" + direction.SelectString("From", "To") + nameOfOtherType
+}
+
 // assignToOptional will generate a conversion where the destination is optional, if the
 // underlying type of the destination is compatible with the source.
 //
@@ -169,8 +175,6 @@ func assignToOptional(
 		return nil
 	}
 
-	local := destinationEndpoint.CreateLocal("", "Temp")
-
 	return func(reader dst.Expr, writer func(dst.Expr) []dst.Stmt, generationContext *astmodel.CodeGenerationContext) []dst.Stmt {
 		// Create a writer that uses the address of the passed expression
 		// If expr isn't a plain identifier (implying a local variable), we introduce one
@@ -180,10 +184,11 @@ func assignToOptional(
 				return writer(astbuilder.AddrOf(expr))
 			}
 
-			assignment := astbuilder.SimpleAssignment(
-				dst.NewIdent(local),
-				token.DEFINE,
-				expr)
+			// Only obtain our local variable name after we know we need it
+			// (this avoids reserving the name and not using it, which can interact with other conversions)
+			local := destinationEndpoint.CreateLocal("", "Temp")
+
+			assignment := astbuilder.ShortDeclaration(local, expr)
 
 			writing := writer(astbuilder.AddrOf(dst.NewIdent(local)))
 
@@ -226,8 +231,6 @@ func assignFromOptional(
 		return nil
 	}
 
-	local := sourceEndpoint.CreateLocal("", "Read")
-
 	return func(reader dst.Expr, writer func(dst.Expr) []dst.Stmt, generationContext *astmodel.CodeGenerationContext) []dst.Stmt {
 		var cacheOriginal dst.Stmt
 		var actualReader dst.Expr
@@ -243,10 +246,12 @@ func assignFromOptional(
 			actualReader = reader
 		default:
 			// Something else, so we cache the original
-			cacheOriginal = astbuilder.SimpleAssignment(
-				dst.NewIdent(local),
-				token.DEFINE,
-				reader)
+
+			// Only obtain our local variable name after we know we need it
+			// (this avoids reserving the name and not using it, which can interact with other conversions)
+			local := sourceEndpoint.CreateLocal("", "Read")
+
+			cacheOriginal = astbuilder.ShortDeclaration(local, reader)
 			actualReader = dst.NewIdent(local)
 		}
 
@@ -261,11 +266,10 @@ func assignFromOptional(
 		writeZeroValue := writer(
 			destinationEndpoint.Type().AsZero(conversionContext.Types(), generationContext))
 
-		stmt := &dst.IfStmt{
-			Cond: checkForNil,
-			Body: astbuilder.StatementBlock(writeActualValue...),
-			Else: astbuilder.StatementBlock(writeZeroValue...),
-		}
+		stmt := astbuilder.SimpleIfElse(
+			checkForNil,
+			writeActualValue,
+			writeZeroValue)
 
 		return astbuilder.Statements(cacheOriginal, stmt)
 	}
@@ -548,9 +552,8 @@ func assignArrayFromArray(
 		indexId := sourceEndpoint.CreateLocal("Index")
 		tempId := sourceEndpoint.CreateLocal("List")
 
-		declaration := astbuilder.SimpleAssignment(
-			dst.NewIdent(tempId),
-			token.DEFINE,
+		declaration := astbuilder.ShortDeclaration(
+			tempId,
 			astbuilder.MakeList(destinationArray.AsType(generationContext), astbuilder.CallFunc("len", reader)))
 
 		writeToElement := func(expr dst.Expr) []dst.Stmt {
@@ -560,12 +563,11 @@ func assignArrayFromArray(
 						X:     dst.NewIdent(tempId),
 						Index: dst.NewIdent(indexId),
 					},
-					token.ASSIGN,
 					expr),
 			}
 		}
 
-		avoidAliasing := astbuilder.SimpleAssignment(dst.NewIdent(itemId), token.DEFINE, dst.NewIdent(itemId))
+		avoidAliasing := astbuilder.ShortDeclaration(itemId, dst.NewIdent(itemId))
 		avoidAliasing.Decs.Start.Append("// Shadow the loop variable to avoid aliasing")
 		avoidAliasing.Decs.Before = dst.NewLine
 
@@ -632,9 +634,8 @@ func assignMapFromMap(
 		keyId := sourceEndpoint.CreateLocal("Key")
 		tempId := sourceEndpoint.CreateLocal("Map")
 
-		declaration := astbuilder.SimpleAssignment(
-			dst.NewIdent(tempId),
-			token.DEFINE,
+		declaration := astbuilder.ShortDeclaration(
+			tempId,
 			astbuilder.MakeMap(destinationMap.KeyType().AsType(generationContext), destinationMap.ValueType().AsType(generationContext)))
 
 		assignToItem := func(expr dst.Expr) []dst.Stmt {
@@ -644,12 +645,11 @@ func assignMapFromMap(
 						X:     dst.NewIdent(tempId),
 						Index: dst.NewIdent(keyId),
 					},
-					token.ASSIGN,
 					expr),
 			}
 		}
 
-		avoidAliasing := astbuilder.SimpleAssignment(dst.NewIdent(itemId), token.DEFINE, dst.NewIdent(itemId))
+		avoidAliasing := astbuilder.ShortDeclaration(itemId, dst.NewIdent(itemId))
 		avoidAliasing.Decs.Start.Append("// Shadow the loop variable to avoid aliasing")
 		avoidAliasing.Decs.Before = dst.NewLine
 
@@ -713,10 +713,7 @@ func assignEnumFromEnum(
 	local := destinationEndpoint.CreateLocal("", "As"+destinationName.Name(), "Value")
 	return func(reader dst.Expr, writer func(dst.Expr) []dst.Stmt, ctx *astmodel.CodeGenerationContext) []dst.Stmt {
 		result := []dst.Stmt{
-			astbuilder.SimpleAssignment(
-				dst.NewIdent(local),
-				token.DEFINE,
-				astbuilder.CallFunc(destinationName.Name(), reader)),
+			astbuilder.ShortDeclaration(local, astbuilder.CallFunc(destinationName.Name(), reader)),
 		}
 
 		result = append(result, writer(dst.NewIdent(local))...)
@@ -853,18 +850,18 @@ func assignObjectFromObject(
 			actualReader = astbuilder.AddrOf(reader)
 		}
 
-		functionName := nameOfPropertyAssignmentFunction(sourceName, conversionContext.direction, conversionContext.idFactory)
+		functionName := NameOfPropertyAssignmentFunction(sourceName, conversionContext.direction, conversionContext.idFactory)
 
 		var conversion dst.Stmt
 		if destinationName.PackageReference.Equals(generationContext.CurrentPackage()) {
 			// Destination is our current type
-			conversion = astbuilder.SimpleAssignment(
+			conversion = astbuilder.AssignmentStatement(
 				errLocal,
 				tok,
 				astbuilder.CallExpr(localId, functionName, actualReader))
 		} else {
 			// Destination is another type
-			conversion = astbuilder.SimpleAssignment(
+			conversion = astbuilder.AssignmentStatement(
 				errLocal,
 				tok,
 				astbuilder.CallExpr(reader, functionName, astbuilder.AddrOf(localId)))

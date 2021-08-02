@@ -42,7 +42,7 @@ func newConvertToARMFunctionBuilder(
 			receiverTypeExpr:      receiver.AsType(codeGenerationContext),
 			armTypeIdent:          c.armTypeName.Name(),
 			idFactory:             c.idFactory,
-			isSpecType:            c.isSpecType,
+			typeKind:              c.typeKind,
 			codeGenerationContext: codeGenerationContext,
 		},
 		resultIdent:           "result",
@@ -131,7 +131,7 @@ func (builder *convertToARMBuilder) namePropertyHandler(
 	toProp *astmodel.PropertyDefinition,
 	fromType *astmodel.ObjectType) []dst.Stmt {
 
-	if toProp.PropertyName() != "Name" || !builder.isSpecType {
+	if toProp.PropertyName() != "Name" || builder.typeKind != TypeKindSpec {
 		return nil
 	}
 
@@ -207,7 +207,7 @@ func (builder *convertToARMBuilder) flattenedPropertyHandler(
 
 	// collect any fromProps that were flattened from the to-prop
 	var fromProps []*astmodel.PropertyDefinition
-	for _, prop := range fromType.Properties() {
+	for _, prop := range fromType.Properties().AsSlice() {
 		if prop.WasFlattenedFrom(toPropName) {
 			fromProps = append(fromProps, prop)
 		}
@@ -259,7 +259,14 @@ func (builder *convertToARMBuilder) flattenedPropertyHandler(
 	// Copy each from-prop into the to-prop
 	for _, fromProp := range fromProps {
 		// find the corresponding inner property on the to-prop type
-		toSubProp, ok := toPropObjType.Property(fromProp.PropertyName())
+		// TODO: If this property is an ARM reference we need a bit of special handling.
+		// TODO: See https://github.com/Azure/azure-service-operator/issues/1651 for possible improvements to this.
+		toSubPropName := fromProp.PropertyName()
+		if values, ok := fromProp.Tag(astmodel.ARMReferenceTag); ok {
+			toSubPropName = astmodel.PropertyName(values[0])
+		}
+
+		toSubProp, ok := toPropObjType.Property(toSubPropName)
 		if !ok {
 			panic(fmt.Sprintf("unable to find expected property %s inside property %s", fromProp.PropertyName(), toPropName))
 		}
@@ -332,7 +339,7 @@ func (builder *convertToARMBuilder) buildToPropInitializer(
 
 func (builder *convertToARMBuilder) fixedValuePropertyHandler(propertyName astmodel.PropertyName) propertyConversionHandler {
 	return func(toProp *astmodel.PropertyDefinition, fromType *astmodel.ObjectType) []dst.Stmt {
-		if toProp.PropertyName() != propertyName || !builder.isSpecType {
+		if toProp.PropertyName() != propertyName || builder.typeKind != TypeKindSpec {
 			return nil
 		}
 
@@ -353,7 +360,7 @@ func (builder *convertToARMBuilder) fixedValuePropertyHandler(propertyName astmo
 
 		enumType, ok := def.Type().(*astmodel.EnumType)
 		if !ok {
-			panic(fmt.Sprintf("Enum %v definition was not of type EnumDefinition", enumTypeName))
+			panic(fmt.Sprintf("Enum %s definition was not of type EnumDefinition", enumTypeName))
 		}
 
 		optionId := astmodel.GetEnumValueId(def.Name().Name(), enumType.Options()[0])

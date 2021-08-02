@@ -21,11 +21,14 @@ import (
 	"github.com/Azure/azure-service-operator/hack/generator/pkg/astmodel"
 )
 
+// ExportPackagesStageID is the unique identifier for this pipeline stage
+const ExportPackagesStageID = "exportPackages"
+
 // ExportPackages creates a Stage to export our generated code as a set of packages
 func ExportPackages(outputPath string) Stage {
 	description := fmt.Sprintf("Export packages to %q", outputPath)
-	return MakeStage(
-		"exportPackages",
+	stage := MakeLegacyStage(
+		ExportPackagesStageID,
 		description,
 		func(ctx context.Context, types astmodel.Types) (astmodel.Types, error) {
 			packages, err := CreatePackagesForDefinitions(types)
@@ -40,6 +43,8 @@ func ExportPackages(outputPath string) Stage {
 
 			return types, nil
 		})
+	stage.RequiresPrerequisiteStages(DeleteGeneratedCodeStageID)
+	return stage
 }
 
 // CreatePackagesForDefinitions groups type definitions into packages
@@ -51,7 +56,7 @@ func CreatePackagesForDefinitions(definitions astmodel.Types) (map[astmodel.Pack
 		defName := def.Name()
 		pkgRef, ok := defName.PackageReference.AsLocalPackage()
 		if !ok {
-			klog.Errorf("Definition %v from external package %v skipped", defName.Name(), defName.PackageReference)
+			klog.Errorf("Definition %s from external package %s skipped", defName.Name(), defName.PackageReference)
 			continue
 		}
 
@@ -190,9 +195,9 @@ func (export *progressMeter) Log() {
 
 	elapsed := time.Since(started).Round(time.Millisecond)
 	if export.label != "" {
-		klog.V(2).Infof("Wrote %d files containing %d definitions for %v in %v", export.files, export.definitions, export.label, elapsed)
+		klog.V(2).Infof("Wrote %d files containing %d definitions for %s in %s", export.files, export.definitions, export.label, elapsed)
 	} else {
-		klog.V(2).Infof("Wrote %d files containing %d definitions in %v", export.files, export.definitions, time.Since(started))
+		klog.V(2).Infof("Wrote %d files containing %d definitions in %s", export.files, export.definitions, time.Since(started))
 	}
 
 	export.resetAt = time.Now()

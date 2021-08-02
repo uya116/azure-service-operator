@@ -18,7 +18,7 @@ import (
 const resourcesPropertyName = astmodel.PropertyName("Resources")
 
 func DetermineResourceOwnership(configuration *config.Configuration) Stage {
-	return MakeStage(
+	return MakeLegacyStage(
 		"determineResourceOwnership",
 		"Determine ARM resource relationships",
 		func(ctx context.Context, types astmodel.Types) (astmodel.Types, error) {
@@ -27,7 +27,6 @@ func DetermineResourceOwnership(configuration *config.Configuration) Stage {
 }
 
 func determineOwnership(definitions astmodel.Types, configuration *config.Configuration) (astmodel.Types, error) {
-
 	updatedDefs := make(astmodel.Types)
 
 	for _, def := range definitions {
@@ -73,7 +72,7 @@ func determineOwnership(definitions astmodel.Types, configuration *config.Config
 
 	setResourceGroupOwnerForResourcesWithNoOwner(configuration, definitions, updatedDefs)
 
-	return astmodel.TypesDisjointUnion(definitions.Except(updatedDefs), updatedDefs), nil
+	return definitions.OverlayWith(updatedDefs), nil
 }
 
 func resourceSpecTypeAsObject(resourceSpecDef astmodel.TypeDefinition) (*astmodel.ObjectType, error) {
@@ -180,6 +179,9 @@ func extractChildResourceTypeNames(resourcesPropertyTypeDef astmodel.TypeDefinit
 	}
 }
 
+// this is the name we expect to see on "child resources" in the ARM JSON schema
+const ChildResourceNameSuffix = "ChildResource"
+
 func updateChildResourceDefinitionsWithOwner(
 	definitions astmodel.Types,
 	childResourceTypeNames []astmodel.TypeName,
@@ -188,8 +190,8 @@ func updateChildResourceDefinitionsWithOwner(
 
 	for _, typeName := range childResourceTypeNames {
 		// If the typename ends in ChildResource, remove that
-		if strings.HasSuffix(typeName.Name(), "ChildResource") {
-			typeName = astmodel.MakeTypeName(typeName.PackageReference, strings.TrimSuffix(typeName.Name(), "ChildResource"))
+		if strings.HasSuffix(typeName.Name(), ChildResourceNameSuffix) {
+			typeName = astmodel.MakeTypeName(typeName.PackageReference, strings.TrimSuffix(typeName.Name(), ChildResourceNameSuffix))
 		}
 
 		// If type typename is ExtensionsChild, remove Child -- this is a special case due to
@@ -214,7 +216,7 @@ func updateChildResourceDefinitionsWithOwner(
 		if updatedDef, ok := updatedDefs[typeName]; ok {
 			// already exists, make sure it is the same
 			if !updatedDef.Type().Equals(childResourceDef.Type()) {
-				return errors.Errorf("conflicting child resource already defined for %v", typeName)
+				return errors.Errorf("conflicting child resource already defined for %s", typeName)
 			}
 		} else {
 			updatedDefs.Add(childResourceDef)

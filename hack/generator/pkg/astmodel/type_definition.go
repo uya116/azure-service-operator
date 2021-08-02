@@ -6,11 +6,13 @@
 package astmodel
 
 import (
+	"fmt"
 	"go/token"
 
-	"github.com/Azure/azure-service-operator/hack/generator/pkg/astbuilder"
 	"github.com/dave/dst"
 	"github.com/pkg/errors"
+
+	"github.com/Azure/azure-service-operator/hack/generator/pkg/astbuilder"
 )
 
 // TypeDefinition is a name paired with a type
@@ -72,6 +74,12 @@ func (def TypeDefinition) AsDeclarations(codeGenerationContext *CodeGenerationCo
 		Name:        def.name,
 		Description: def.description,
 	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			panic(fmt.Sprintf("while generating %s/%s: %s", codeGenerationContext.currentPackage, def.name, p))
+		}
+	}()
 
 	return def.theType.AsDeclarations(codeGenerationContext, declContext)
 }
@@ -153,11 +161,11 @@ func (def TypeDefinition) ApplyObjectTransformation(transform func(*ObjectType) 
 
 	newType, err := visitor.Visit(def.theType, nil)
 	if err != nil {
-		return TypeDefinition{}, errors.Wrapf(err, "transformation of %v failed", def.name)
+		return TypeDefinition{}, errors.Wrapf(err, "transformation of %s failed", def.name)
 	}
 
 	if !visited {
-		return TypeDefinition{}, errors.Errorf("transformation was not applied to %v (expected object type, found %v)", def.name, def.theType)
+		return TypeDefinition{}, errors.Errorf("transformation was not applied to %s (expected object type, found %s)", def.name, def.theType)
 	}
 
 	result := def.WithType(newType)

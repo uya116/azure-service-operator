@@ -46,7 +46,7 @@ func NewTargetedCodeGeneratorFromConfig(
 
 	result, err := NewCodeGeneratorFromConfig(configuration, idFactory)
 	if err != nil {
-		return nil, errors.Wrapf(err, "creating pipeline targeting %v", target)
+		return nil, errors.Wrapf(err, "creating pipeline targeting %s", target)
 	}
 
 	// Filter stages to use only those appropriate for our target
@@ -117,8 +117,7 @@ func createAllPipelineStages(idFactory astmodel.IdentifierFactory, configuration
 
 		// De-pluralize resource types
 		// (Must come after type aliases are resolved)
-		pipeline.ImproveResourcePluralization().
-			RequiresPrerequisiteStages("removeAliases"),
+		pipeline.ImproveResourcePluralization(),
 
 		pipeline.StripUnreferencedTypeDefinitions(),
 
@@ -129,6 +128,8 @@ func createAllPipelineStages(idFactory astmodel.IdentifierFactory, configuration
 		// Apply export filters before generating
 		// ARM types for resources etc:
 		pipeline.ApplyExportFilters(configuration),
+
+		pipeline.VerifyNoErroredTypes(),
 
 		pipeline.StripUnreferencedTypeDefinitions(),
 
@@ -145,26 +146,45 @@ func createAllPipelineStages(idFactory astmodel.IdentifierFactory, configuration
 		// Effects the "flatten" property of Properties:
 		pipeline.FlattenProperties(),
 
+		// Remove types which may not be needed after flattening
+		pipeline.StripUnreferencedTypeDefinitions(),
+
 		pipeline.AddCrossplaneOwnerProperties(idFactory).UsedFor(pipeline.CrossplaneTarget),
 		pipeline.AddCrossplaneForProvider(idFactory).UsedFor(pipeline.CrossplaneTarget),
 		pipeline.AddCrossplaneAtProvider(idFactory).UsedFor(pipeline.CrossplaneTarget),
 		pipeline.AddCrossplaneEmbeddedResourceSpec(idFactory).UsedFor(pipeline.CrossplaneTarget),
 		pipeline.AddCrossplaneEmbeddedResourceStatus(idFactory).UsedFor(pipeline.CrossplaneTarget),
 
-		pipeline.CreateStorageTypes(idFactory).UsedFor(pipeline.ARMTarget), // TODO: For now only used for ARM
+		// Create Storage types
+		// TODO: For now only used for ARM
+		pipeline.CreateConversionGraph().UsedFor(pipeline.ARMTarget),
+		pipeline.InjectOriginalVersionFunction(idFactory).UsedFor(pipeline.ARMTarget),
+		pipeline.CreateStorageTypes().UsedFor(pipeline.ARMTarget),
+		pipeline.InjectOriginalVersionProperty().UsedFor(pipeline.ARMTarget),
+		pipeline.InjectPropertyAssignmentFunctions(idFactory).UsedFor(pipeline.ARMTarget),
+		pipeline.InjectOriginalGVKFunction(idFactory).UsedFor(pipeline.ARMTarget),
+
 		pipeline.SimplifyDefinitions(),
 		pipeline.InjectJsonSerializationTests(idFactory).UsedFor(pipeline.ARMTarget),
 
 		pipeline.MarkStorageVersion(),
+
+		/*
+			  Disabled until we have the Convertible interface implemented
+
+			   If we land with a partial implementation, the controller refuses to accept the webhooks
+			   See https://github.com/kubernetes-sigs/controller-runtime/blob/master/pkg/webhook/conversion/conversion.go#L310
+
+			pipeline.InjectHubFunction(idFactory).UsedFor(pipeline.ARMTarget),
+			pipeline.ImplementConvertibleInterface(idFactory),
+		*/
 
 		// Safety checks at the end:
 		pipeline.EnsureDefinitionsDoNotUseAnyTypes(),
 		pipeline.EnsureARMTypeExistsForEveryResource().UsedFor(pipeline.ARMTarget),
 
 		pipeline.DeleteGeneratedCode(configuration.FullTypesOutputPath()),
-
-		pipeline.ExportPackages(configuration.FullTypesOutputPath()).
-			RequiresPrerequisiteStages("deleteGenerated"),
+		pipeline.ExportPackages(configuration.FullTypesOutputPath()),
 
 		pipeline.ExportControllerResourceRegistrations(configuration.FullTypesRegistrationOutputFilePath()).UsedFor(pipeline.ARMTarget),
 	}
@@ -172,19 +192,19 @@ func createAllPipelineStages(idFactory astmodel.IdentifierFactory, configuration
 
 // Generate produces the Go code corresponding to the configured JSON schema in the given output folder
 func (generator *CodeGenerator) Generate(ctx context.Context) error {
-	klog.V(1).Infof("Generator version: %v", pipeline.CombinedVersion())
+	klog.V(1).Infof("Generator version: %s", pipeline.CombinedVersion())
 
-	defs := make(astmodel.Types)
+	state := pipeline.NewState()
 	for i, stage := range generator.pipeline {
 		klog.V(0).Infof("%d/%d: %s", i+1, len(generator.pipeline), stage.Description())
 		// Defensive copy (in case the pipeline modifies its inputs) so that we can compare types in vs out
-		defsOut, err := stage.Run(ctx, defs.Copy())
+		stateOut, err := stage.Run(ctx, state)
 		if err != nil {
 			return errors.Wrapf(err, "failed during pipeline stage %d/%d: %s", i+1, len(generator.pipeline), stage.Description())
 		}
 
-		defsAdded := defsOut.Except(defs)
-		defsRemoved := defs.Except(defsOut)
+		defsAdded := stateOut.Types().Except(state.Types())
+		defsRemoved := state.Types().Except(stateOut.Types())
 
 		if len(defsAdded) > 0 && len(defsRemoved) > 0 {
 			klog.V(1).Infof("Added %d, removed %d type definitions", len(defsAdded), len(defsRemoved))
@@ -194,7 +214,7 @@ func (generator *CodeGenerator) Generate(ctx context.Context) error {
 			klog.V(1).Infof("Removed %d type definitions", len(defsRemoved))
 		}
 
-		defs = defsOut
+		state = stateOut
 	}
 
 	klog.Info("Finished")
@@ -218,7 +238,11 @@ func (generator *CodeGenerator) verifyPipeline() error {
 		}
 
 		for _, postreq := range stage.Postrequisites() {
-			stagesExpected[postreq] = append(stagesExpected[postreq], stage.Id())
+			if _, ok := stagesSeen[postreq]; ok {
+				errs = append(errs, errors.Errorf("postrequisite %q of stage %q satisfied too early", postreq, stage.Id()))
+			} else {
+				stagesExpected[postreq] = append(stagesExpected[postreq], stage.Id())
+			}
 		}
 
 		stagesSeen[stage.Id()] = struct{}{}

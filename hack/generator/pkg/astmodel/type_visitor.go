@@ -66,7 +66,7 @@ func (tv *TypeVisitor) Visit(t Type, ctx interface{}) (Type, error) {
 		return tv.visitErroredType(tv, it, ctx)
 	}
 
-	panic(fmt.Sprintf("unhandled type: (%T) %v", t, t))
+	panic(fmt.Sprintf("unhandled type: (%T) %s", t, t))
 }
 
 // VisitDefinition invokes the TypeVisitor on both the name and type of the definition
@@ -121,58 +121,67 @@ func IdentityVisitOfArrayType(this *TypeVisitor, it *ArrayType, ctx interface{})
 		return nil, errors.Wrap(err, "failed to visit type of array")
 	}
 
-	if newElement == it.element {
-		return it, nil // short-circuit
-	}
-
-	return NewArrayType(newElement), nil
+	return it.WithElement(newElement), nil
 }
 
 func IdentityVisitOfPrimitiveType(_ *TypeVisitor, it *PrimitiveType, _ interface{}) (Type, error) {
 	return it, nil
 }
 
-func IdentityVisitOfObjectType(this *TypeVisitor, it *ObjectType, ctx interface{}) (Type, error) {
-	// just map the property types
-	var errs []error
-	var newProps []*PropertyDefinition
-	for _, prop := range it.Properties() {
-		p, err := this.Visit(prop.propertyType, ctx)
-		if err != nil {
-			errs = append(errs, err)
-		} else {
-			newProps = append(newProps, prop.WithType(p))
+func identityVisitObjectTypePerPropertyContext(_ *PropertyDefinition, ctx interface{}) interface{} {
+	return ctx
+}
+
+var IdentityVisitOfObjectType = MakeIdentityVisitOfObjectTypeWithPerPropertyContext(identityVisitObjectTypePerPropertyContext)
+
+// MakeIdentityVisitOfObjectTypeWithPerPropertyContext creates an visitor function which creates a per-property context before visiting each
+// property of the ObjectType
+func MakeIdentityVisitOfObjectTypeWithPerPropertyContext(
+	makeCtx func(prop *PropertyDefinition, ctx interface{}) interface{}) func(this *TypeVisitor, it *ObjectType, ctx interface{}) (Type, error) {
+
+	return func(this *TypeVisitor, it *ObjectType, ctx interface{}) (Type, error) {
+		// just map the property types
+		var errs []error
+		var newProps []*PropertyDefinition
+		for _, prop := range it.Properties().AsSlice() {
+			p, err := this.Visit(prop.propertyType, ctx)
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				newProps = append(newProps, prop.WithType(p))
+			}
 		}
-	}
 
-	if len(errs) > 0 {
-		return nil, kerrors.NewAggregate(errs)
-	}
-
-	// map the embedded types too
-	var newEmbeddedProps []*PropertyDefinition
-	for _, prop := range it.EmbeddedProperties() {
-		p, err := this.Visit(prop.propertyType, ctx)
-		if err != nil {
-			errs = append(errs, err)
-		} else {
-			newEmbeddedProps = append(newEmbeddedProps, prop.WithType(p))
+		if len(errs) > 0 {
+			return nil, kerrors.NewAggregate(errs)
 		}
-	}
 
-	if len(errs) > 0 {
-		return nil, kerrors.NewAggregate(errs)
-	}
+		// map the embedded types too
+		var newEmbeddedProps []*PropertyDefinition
+		for _, prop := range it.EmbeddedProperties() {
+			newCtx := makeCtx(prop, ctx)
+			p, err := this.Visit(prop.propertyType, newCtx)
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				newEmbeddedProps = append(newEmbeddedProps, prop.WithType(p))
+			}
+		}
 
-	result := it.WithProperties(newProps...)
-	// Since it's possible that the type was renamed we need to clear the old embedded properties
-	result = result.WithoutEmbeddedProperties()
-	result, err := result.WithEmbeddedProperties(newEmbeddedProps...)
-	if err != nil {
-		return nil, err
-	}
+		if len(errs) > 0 {
+			return nil, kerrors.NewAggregate(errs)
+		}
 
-	return result, nil
+		result := it.WithProperties(newProps...)
+		// Since it's possible that the type was renamed we need to clear the old embedded properties
+		result = result.WithoutEmbeddedProperties()
+		result, err := result.WithEmbeddedProperties(newEmbeddedProps...)
+		if err != nil {
+			return nil, err
+		}
+
+		return result, nil
+	}
 }
 
 func IdentityVisitOfMapType(this *TypeVisitor, it *MapType, ctx interface{}) (Type, error) {
@@ -186,11 +195,7 @@ func IdentityVisitOfMapType(this *TypeVisitor, it *MapType, ctx interface{}) (Ty
 		return nil, errors.Wrapf(err, "failed to visit map value type %q", it.value)
 	}
 
-	if visitedKey == it.key && visitedValue == it.value {
-		return it, nil // short-circuit
-	}
-
-	return NewMapType(visitedKey, visitedValue), nil
+	return it.WithKeyType(visitedKey).WithValueType(visitedValue), nil
 }
 
 func IdentityVisitOfEnumType(_ *TypeVisitor, it *EnumType, _ interface{}) (Type, error) {
@@ -205,11 +210,7 @@ func IdentityVisitOfOptionalType(this *TypeVisitor, it *OptionalType, ctx interf
 		return nil, errors.Wrapf(err, "failed to visit optional element type %q", it.element)
 	}
 
-	if visitedElement == it.element {
-		return it, nil // short-circuit
-	}
-
-	return NewOptionalType(visitedElement), nil
+	return it.WithElement(visitedElement), nil
 }
 
 func IdentityVisitOfResourceType(this *TypeVisitor, it *ResourceType, ctx interface{}) (Type, error) {
@@ -241,7 +242,6 @@ func IdentityVisitOfOneOfType(this *TypeVisitor, it *OneOfType, ctx interface{})
 		newTypes = append(newTypes, newType)
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +264,6 @@ func IdentityVisitOfAllOfType(this *TypeVisitor, it *AllOfType, ctx interface{})
 		newTypes = append(newTypes, newType)
 		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}

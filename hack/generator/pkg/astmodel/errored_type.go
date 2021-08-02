@@ -35,6 +35,16 @@ func NewErroredType(t Type, errors []string, warnings []string) *ErroredType {
 	return result.WithType(t) // using WithType ensures warnings and errors get merged if needed
 }
 
+// Errors returns the errors stored in this ErroredType
+func (e *ErroredType) Errors() []string {
+	return append([]string(nil), e.errors...)
+}
+
+// Warnings returns the warnings stored in this ErroredType
+func (e *ErroredType) Warnings() []string {
+	return append([]string(nil), e.warnings...)
+}
+
 func (e *ErroredType) InnerType() Type {
 	return e.inner
 }
@@ -53,13 +63,13 @@ func (e *ErroredType) WithType(t Type) *ErroredType {
 }
 
 func (e *ErroredType) Equals(t Type) bool {
+	if e == t {
+		return true // short-circuit
+	}
+
 	other, ok := t.(*ErroredType)
 	if !ok {
 		return false
-	}
-
-	if e == other {
-		return true // short-circuit
 	}
 
 	return ((e.inner == nil && other.inner == nil) || e.inner.Equals(other.inner)) &&
@@ -67,9 +77,31 @@ func (e *ErroredType) Equals(t Type) bool {
 		stringSlicesEqual(e.errors, other.errors)
 }
 
-func stringSlicesEqual(l []string, r []string) bool {
+func propertyNameSlicesEqual(l, r []PropertyName) bool {
 	if len(l) != len(r) {
 		return false
+	}
+
+	if len(l) > 0 && (&l[0] == &r[0]) {
+		return true // reference equality
+	}
+
+	for ix := range l {
+		if string(l[ix]) != string(r[ix]) {
+			return false
+		}
+	}
+
+	return true
+}
+
+func stringSlicesEqual(l, r []string) bool {
+	if len(l) != len(r) {
+		return false
+	}
+
+	if len(l) > 0 && (&l[0] == &r[0]) {
+		return true // reference equality
 	}
 
 	for ix := range l {
@@ -163,7 +195,11 @@ func (e *ErroredType) Unwrap() Type {
 // types is a dictionary for resolving named types
 func (e *ErroredType) WriteDebugDescription(builder *strings.Builder, types Types) {
 	builder.WriteString("Error[")
-	e.inner.WriteDebugDescription(builder, types)
+	if e.inner != nil {
+		e.inner.WriteDebugDescription(builder, types)
+	} else {
+		builder.WriteString("<missing>")
+	}
 
 	for _, e := range e.errors {
 		builder.WriteString("|")
