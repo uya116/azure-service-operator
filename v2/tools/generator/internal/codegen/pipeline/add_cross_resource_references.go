@@ -195,6 +195,7 @@ func makeResourceReferenceProperty(idFactory astmodel.IdentifierFactory, existin
 // Set the value to false to eliminate a reference which has incorrectly been flagged
 func newKnownReferencesMap(configuration *config.Configuration) map[referencePair]bool {
 	batch20210101 := configuration.MakeLocalPackageReference("microsoft.batch", "v1alpha1api20210101")
+	batch20210601 := configuration.MakeLocalPackageReference("microsoft.batch", "v1alpha1api20210601")
 	documentDB20210515 := configuration.MakeLocalPackageReference("microsoft.documentdb", "v1alpha1api20210515")
 	storage20210401 := configuration.MakeLocalPackageReference("microsoft.storage", "v1alpha1api20210401")
 	serviceBus20210101 := configuration.MakeLocalPackageReference("microsoft.servicebus", "v1alpha1api20210101preview")
@@ -214,6 +215,18 @@ func newKnownReferencesMap(configuration *config.Configuration) map[referencePai
 		{
 			typeName: astmodel.MakeTypeName(batch20210101, "AutoStorageBaseProperties"),
 			propName: "StorageAccountId",
+		}: true,
+		{
+			typeName: astmodel.MakeTypeName(batch20210601, "KeyVaultReference"),
+			propName: "Id",
+		}: true,
+		{
+			typeName: astmodel.MakeTypeName(batch20210601, "AutoStorageBaseProperties"),
+			propName: "StorageAccountId",
+		}: true,
+		{
+			typeName: astmodel.MakeTypeName(batch20210601, "ComputeNodeIdentityReference"),
+			propName: "ResourceId",
 		}: true,
 		// Document DB
 		{
