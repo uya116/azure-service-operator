@@ -10,6 +10,10 @@ v1alpha1api20210101
 
 - BatchAccount
 
+v1alpha1api20210601
+
+- BatchAccount
+
 ### microsoft.compute
 
 v1alpha1api20200930
