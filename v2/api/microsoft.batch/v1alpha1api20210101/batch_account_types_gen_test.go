@@ -6,6 +6,7 @@ package v1alpha1api20210101
 import (
 	"encoding/json"
 	"github.com/Azure/azure-service-operator/v2/api/microsoft.batch/v1alpha1api20210101storage"
+	"github.com/Azure/azure-service-operator/v2/api/microsoft.batch/v1alpha1api20210601storage"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/kr/pretty"
@@ -32,7 +33,7 @@ func Test_BatchAccount_WhenConvertedToHub_RoundTripsWithoutLoss(t *testing.T) {
 // RunResourceConversionTestForBatchAccount tests if a specific instance of BatchAccount round trips to the hub storage version and back losslessly
 func RunResourceConversionTestForBatchAccount(subject BatchAccount) string {
 	// Convert to our hub version
-	var hub v1alpha1api20210101storage.BatchAccount
+	var hub v1alpha1api20210601storage.BatchAccount
 	err := subject.ConvertTo(&hub)
 	if err != nil {
 		return err.Error()
