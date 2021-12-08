@@ -1,4 +1,4 @@
-| Types defined in eventgrid                                 | v1alpha1api20200601 |
+| Types defined in package "eventgrid"                       | v1alpha1api20200601 |
 |------------------------------------------------------------|---------------------|
 | InboundIpRuleStatusAction                                  | v1alpha1api20200601 |
 | InboundIpRule_Status                                       | v1alpha1api20200601 |
